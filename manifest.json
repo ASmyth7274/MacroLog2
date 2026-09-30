@@ -2,14 +2,26 @@
   "name": "MacroLog",
   "short_name": "MacroLog",
   "description": "Daily food & macro tracker — offline-first companion to IronLog",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0B0B0D",
   "theme_color": "#0B0B0D",
+  "categories": ["health", "fitness", "food", "lifestyle"],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Log food", "short_name": "Log food", "description": "Search, scan or pick a food to log",
+      "url": "./index.html?tab=add", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Scan a barcode", "short_name": "Scan", "description": "Open the barcode scanner",
+      "url": "./index.html?scan=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Diary", "short_name": "Diary", "description": "Today's meals, editable",
+      "url": "./index.html?tab=diary", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

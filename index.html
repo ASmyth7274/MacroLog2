@@ -13,8 +13,11 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500;1,9..144,650&display=swap" rel="stylesheet">
-<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<!-- crossorigin on the CDN assets: they are fetched with CORS, so the service
+     worker can cache them as ordinary responses (opaque ones are padded to
+     megabytes each in quota accounting — see sw.js) -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500;1,9..144,650&display=swap" rel="stylesheet" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <style>
 /* ============================================================
    MacroLog — same editorial design language as IronLog:
@@ -26,27 +29,51 @@
   --bg:#0B0B0D; --bgtop:#17181D; --card:#151518; --card2:#1F1F24; --line:#28282E;
   --text:#F5F3EE; --dim:#94948E;
   --acc:#C9A96D; --acc2:#E8CFA0; --acc-dim:rgba(201,169,109,.15);
+  /* v4.0 accent roles. --acc stays the brand colour for rings, bars and
+     tints; TEXT in the accent uses --acc-ink, and filled controls (primary
+     buttons, active segments, the + button) use --acc-fill with --on-acc on
+     top. White on the dark-theme bronze measured 2.24:1, and bronze link
+     text on the light background 2.76:1 — every pairing below clears 4.5:1
+     for all six accents (applyTheme() sets the per-accent values). */
+  --acc-ink:#C9A96D; --acc-fill:#C9A96D; --on-acc:#17140D; --chrome-acc:#7E5F28;
   --chrome:#F2EFE7; --chrome-text:#16171B;      /* inverse buttons/chips */
   --navbg:#1A1B20; --navfg:#8D8D94; --navon:#FFFFFF;
   --hdr:rgba(23,24,29,.85);         /* v3.3: --bgtop, not --bg — the old value seamed */
+  --sheet:var(--bg);
   --grn:#2fd671; --grn-dim:rgba(47,214,113,.12);
   --amb:#f5b62e; --red:#ff5c5c; --gold:#ffcf4d;
+  --red-ink:#B3342E;                /* error toast fill (white text 6:1) */
+  /* additive risk classes: none · limited · moderate · high */
+  --ad0:#2fd671; --ad1:#f5b62e; --ad2:#EF7E1A; --ad3:#ff6b4a;
   /* macro identity colours (consistent across rings, charts, chips) */
   --mp:#5FA8FF; --mp2:#9CCBFF;   /* protein  */
   --mc:#F5B62E; --mc2:#FFD770;   /* carbs    */
   --mf:#B07AFF; --mf2:#D5B3FF;   /* fat      */
+  --mp-ink:var(--mp); --mc-ink:var(--mc); --mf-ink:var(--mf);   /* as text */
   --shadow:0 8px 24px rgba(0,0,0,.32);
   --nav-h:62px;
 }
+/* native controls (date pickers, selects, scrollbars) follow the theme */
+body{color-scheme:dark}
 body.light{
-  --bg:#ECEAE3; --bgtop:#F4F2EB; --card:#FFFFFF; --card2:#F0EEE6; --line:#E3E0D6;
-  --text:#1A1B1E; --dim:#85847C;
+  color-scheme:light;
+  --bg:#ECEAE3; --bgtop:#F4F2EB; --card:#FFFFFF; --card2:#ECE9E0; --line:#E0DDD3;
+  --text:#1A1B1E; --dim:#66655D;
   --acc:#A9884D; --acc2:#C9A96D; --acc-dim:rgba(169,136,77,.14);
+  --acc-ink:#7E5F28; --acc-fill:#7E5F28; --on-acc:#FFFFFF; --chrome-acc:#E8CFA0;
   --chrome:#1D1E24; --chrome-text:#F5F3EE;
-  --navbg:#FFFFFF; --navfg:#8B8A81; --navon:#17181B;
+  --navbg:#FFFFFF; --navfg:#77766E; --navon:#17181B;
   --hdr:rgba(244,242,235,.88);
-  --grn-dim:rgba(47,214,113,.16);
+  /* sheets go white in light mode: on the old --bg sheet, buttons and inputs
+     (--card2) measured 1.04:1 against it — effectively invisible */
+  --sheet:#FFFFFF;
+  /* v4.0: the semantic hues were dark-theme neon and light mode never
+     redefined them (1.6–1.9:1 on white). These clear 4.9:1+. */
+  --grn:#0E7A3C; --grn-dim:rgba(14,122,60,.12);
+  --amb:#8A6008; --red:#C62828; --gold:#8F6400;
+  --ad0:#13863F; --ad1:#946800; --ad2:#B4520A; --ad3:#C8321A;
   --mp:#2E7FE0; --mc:#D89A10; --mf:#9257E8;
+  --mp-ink:#1F63B8; --mc-ink:#8A5A00; --mf-ink:#7443C6;
   --shadow:0 10px 26px rgba(35,32,26,.10);
 }
 *{box-sizing:border-box}
@@ -75,10 +102,14 @@ h1,h2,h3,h4,p{margin:0}
 .serif{font-family:'Fraunces',ui-serif,'New York',Georgia,serif}
 
 /* ---------- header ---------- */
+/* v4.0: the header is OPAQUE. It is a flex item above <main>, so nothing ever
+   scrolled beneath it and its frost was never visible — but a translucent,
+   backdrop-filtered surface at the top edge is exactly what makes iOS 26/27
+   fall back to its Liquid Glass blur over the title (see #sbar below). */
 header{
   flex:0 0 auto;z-index:30;position:relative;
   padding:env(safe-area-inset-top) 16px 0;
-  background:var(--hdr);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  background:var(--bgtop);
 }
 /* v3.3 — iOS 27 "blurry top of screen": the status-bar band is painted OPAQUE
    instead of frosted. Two treatments stack in that band on a black-translucent
@@ -97,7 +128,7 @@ header::before{
 }
 .hbar{min-height:54px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0 6px}
 .greet{font-family:'Fraunces',ui-serif,Georgia,serif;font-size:22px;font-weight:650;letter-spacing:-.2px;line-height:1.15}
-.greet .nm{font-style:italic;color:var(--acc)}
+.greet .nm{font-style:italic;color:var(--acc-ink)}
 .hsub{font-size:12.5px;color:var(--dim);margin-top:1px}
 .netchip{
   display:none;align-items:center;gap:6px;flex:0 0 auto;
@@ -131,12 +162,12 @@ nav button span{font-size:10px;font-weight:600;letter-spacing:.2px}
 nav button.nav-add{flex:0 0 62px}
 .nav-add i{
   display:flex;align-items:center;justify-content:center;
-  width:50px;height:50px;border-radius:17px;background:var(--acc);color:#fff;
+  width:50px;height:50px;border-radius:17px;background:var(--acc-fill);color:var(--on-acc);
   box-shadow:0 6px 16px rgba(0,0,0,.35);transform:translateY(-8px);
   transition:transform .15s;
 }
 .nav-add:active i{transform:translateY(-8px) scale(.93)}
-.nav-add i svg{width:26px;height:26px;stroke:#fff;stroke-width:2.2}
+.nav-add i svg{width:26px;height:26px;stroke:currentColor;stroke-width:2.2}
 
 /* ---------- cards / common ---------- */
 .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:14px;margin-bottom:12px}
@@ -151,6 +182,7 @@ nav button.nav-add{flex:0 0 62px}
 .mt8{margin-top:8px}.mt12{margin-top:12px}.mb8{margin-bottom:8px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 
 .btn{
   display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
@@ -159,9 +191,10 @@ nav button.nav-add{flex:0 0 62px}
 }
 .btn:active{filter:brightness(1.2)}
 body.light .btn:active{filter:brightness(.94)}
-.btn.primary{background:var(--acc);color:#fff}
+.btn.primary{background:var(--acc-fill);color:var(--on-acc)}
 .btn.chrome{background:var(--chrome);color:var(--chrome-text)}
 .btn.green{background:var(--grn);color:#04170b}
+body.light .btn.green{color:#fff}
 .btn.danger{background:rgba(255,92,92,.14);color:var(--red)}
 .btn.sm{min-height:42px;font-size:15px;border-radius:12px}
 .btn.inline{width:auto;padding:0 16px}
@@ -176,7 +209,7 @@ body.light .btn:active{filter:brightness(.94)}
 
 .seg{display:flex;background:var(--card2);border-radius:12px;padding:3px;gap:3px}
 .seg>button{flex:1;min-height:38px;border-radius:9px;font-size:14px;font-weight:600;color:var(--dim)}
-.seg>button.on{background:var(--acc);color:#fff}
+.seg>button.on{background:var(--acc-fill);color:var(--on-acc)}
 
 input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 
@@ -188,7 +221,7 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 .overlay.open{opacity:1}
 .sheet{
   width:100%;max-height:88%;display:flex;flex-direction:column;
-  background:var(--bg);border-radius:24px 24px 0 0;
+  background:var(--sheet);border-radius:24px 24px 0 0;
   padding:8px 16px calc(14px + env(safe-area-inset-bottom));
   transform:translateY(60px);transition:transform .22s cubic-bezier(.2,.9,.3,1);
 }
@@ -205,7 +238,18 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
   box-shadow:var(--shadow);opacity:0;transform:translateY(-12px);transition:all .25s;
 }
 .toast.in{opacity:1;transform:translateY(0)}
-.toast.pr{background:var(--acc);color:#fff}
+.toast.pr{background:var(--acc-fill);color:var(--on-acc)}
+.toast.err{background:var(--red-ink);color:#fff}
+/* actionable toasts live bottom-centre, just above the floating nav */
+#snack{position:fixed;left:0;right:0;z-index:70;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;
+  bottom:calc(var(--nav-h) + 22px + env(safe-area-inset-bottom))}
+#snack .toast{transform:translateY(14px)}
+#snack .toast.in{transform:translateY(0)}
+.toast.act{pointer-events:auto;display:flex;align-items:center;gap:10px;padding:5px 5px 5px 16px;min-width:min(320px,86vw)}
+.toast-m{flex:1;min-width:0}
+.toast-a{flex:0 0 auto;font-size:14px;font-weight:800;letter-spacing:.2px;color:var(--chrome-acc);
+  min-height:40px;padding:0 14px;border-radius:10px}
+.toast-a:active{background:rgba(127,127,127,.18)}
 </style>
 <style>
 /* ---------- Today: hero rings ---------- */
@@ -233,6 +277,14 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 .ring-arc.rp.met{filter:drop-shadow(0 0 4px var(--mp)) drop-shadow(0 0 11px var(--mp))}
 .ring-arc.rc.met{filter:drop-shadow(0 0 4px var(--mc)) drop-shadow(0 0 11px var(--mc))}
 .ring-arc.rf.met{filter:drop-shadow(0 0 4px var(--mf)) drop-shadow(0 0 11px var(--mf))}
+/* light theme: neon glow on a white card reads as blur, not light — arcs
+   stay crisp and only a met goal keeps a faint halo */
+body.light .ring-arc{filter:none}
+body.light .ring-arc.rk.met{filter:drop-shadow(0 0 3px var(--acc))}
+body.light .ring-arc.rp.met{filter:drop-shadow(0 0 3px var(--mp))}
+body.light .ring-arc.rc.met{filter:drop-shadow(0 0 3px var(--mc))}
+body.light .ring-arc.rf.met{filter:drop-shadow(0 0 3px var(--mf))}
+body.light .rstat .rv.met{text-shadow:none}
 .ringmid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .ringmid .rk-n{font-size:25px;font-weight:800;letter-spacing:-.5px;line-height:1}
 /* the innermost ring leaves ~52px of clear width — 4+ digit kcal counts
@@ -261,7 +313,7 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 .mealhead .mk{font-size:12.5px;color:var(--dim);font-weight:600}
 .madd{
   margin-left:auto;width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-  background:var(--acc-dim);color:var(--acc);font-size:19px;font-weight:700;line-height:1;
+  background:var(--acc-dim);color:var(--acc-ink);font-size:19px;font-weight:700;line-height:1;
 }
 /* The note pencil belongs WITH the kcal figure, not floating mid-row.
    Two flex items both carrying margin-left:auto split the free space
@@ -284,7 +336,7 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 .fr-slide.drag{transition:none}
 .fr-thumb{
   width:38px;height:38px;border-radius:11px;flex:0 0 auto;overflow:hidden;
-  background:var(--acc-dim);color:var(--acc);
+  background:var(--acc-dim);color:var(--acc-ink);
   display:flex;align-items:center;justify-content:center;
   font-family:'Fraunces',ui-serif,Georgia,serif;font-size:17px;font-weight:650;
 }
@@ -292,7 +344,7 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 .fr-name{font-size:15px;font-weight:600;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fr-sub{font-size:12px;color:var(--dim);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fr-kcal{text-align:right;flex:0 0 54px}  /* fixed width → grade badges align */
-.note-line{font-size:12.5px;color:var(--acc);background:var(--acc-dim);padding:8px 12px;line-height:1.4}
+.note-line{font-size:12.5px;color:var(--acc-ink);background:var(--acc-dim);padding:8px 12px;line-height:1.4}
 .mealcard .note-line{border-bottom:1px solid var(--line)}
 .daynote{display:block;width:100%;text-align:left;border-radius:14px;margin-bottom:10px}
 .fr-kcal b{font-size:15px;font-weight:800}
@@ -303,7 +355,7 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
 /* macro mini-chips under a food name */
 .mch{display:inline-flex;gap:7px;font-size:11px;font-weight:700;color:var(--dim)}
 .mch b{font-weight:800}
-.mch .p b{color:var(--mp)}.mch .c b{color:var(--mc)}.mch .f b{color:var(--mf)}
+.mch .p b{color:var(--mp-ink)}.mch .c b{color:var(--mc-ink)}.mch .f b{color:var(--mf-ink)}
 
 /* ---------- Add tab ---------- */
 .searchwrap{display:flex;gap:8px;margin-bottom:12px}
@@ -323,15 +375,15 @@ input.range{flex:1;accent-color:var(--acc);height:34px;margin:0}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .chip:active{background:var(--acc-dim)}
-.chip b{color:var(--acc);font-weight:800;margin-right:5px}
+.chip b{color:var(--acc-ink);font-weight:800;margin-right:5px}
 .listcard{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
 .food-row{display:flex;align-items:center;gap:10px;padding:11px 12px;width:100%;text-align:left}
 .food-row + .food-row{border-top:1px solid var(--line)}
 .food-row:active{background:var(--card2)}
 .src-tag{font-size:9.5px;font-weight:800;letter-spacing:.5px;padding:2px 6px;border-radius:6px;background:var(--card2);color:var(--dim);flex:0 0 auto}
-.src-tag.off{background:rgba(95,168,255,.13);color:var(--mp)}
+.src-tag.off{background:rgba(95,168,255,.13);color:var(--mp-ink)}
 .src-tag.fdc{background:rgba(47,214,113,.13);color:var(--grn)}
-.src-tag.mine{background:var(--acc-dim);color:var(--acc)}
+.src-tag.mine{background:var(--acc-dim);color:var(--acc-ink)}
 input[type=checkbox]{accent-color:var(--acc);width:20px;height:20px}
 .skel{height:58px;position:relative;overflow:hidden;background:var(--card)}
 .skel + .skel{border-top:1px solid var(--line)}
@@ -346,7 +398,7 @@ input[type=checkbox]{accent-color:var(--acc);width:20px;height:20px}
 
 /* stepper (qty) */
 .stepper{display:flex;align-items:center;gap:8px}
-.stepper button{width:46px;height:46px;border-radius:13px;background:var(--card2);font-size:22px;font-weight:700;color:var(--acc)}
+.stepper button{width:46px;height:46px;border-radius:13px;background:var(--card2);font-size:22px;font-weight:700;color:var(--acc-ink)}
 .stepper input{flex:1;text-align:center;font-size:22px;font-weight:800;background:none;border:0;outline:none;min-width:0;color:var(--text)}
 
 /* ---------- barcode scanner overlay ---------- */
@@ -377,7 +429,7 @@ input[type=checkbox]{accent-color:var(--acc);width:20px;height:20px}
   font-family:'Fraunces',ui-serif,Georgia,serif;font-size:16px;font-weight:650;
 }
 .dlabel input{position:absolute;inset:0;opacity:0;width:100%;height:100%}
-.dtoday{flex:0 0 auto;height:44px;padding:0 13px;border-radius:13px;background:var(--acc-dim);color:var(--acc);font-size:13px;font-weight:700}
+.dtoday{flex:0 0 auto;height:44px;padding:0 13px;border-radius:13px;background:var(--acc-dim);color:var(--acc-ink);font-size:13px;font-weight:700}
 .pastbanner{
   display:flex;align-items:center;gap:9px;margin-bottom:10px;
   background:rgba(245,182,46,.11);border:1px solid rgba(245,182,46,.35);
@@ -393,7 +445,7 @@ input[type=checkbox]{accent-color:var(--acc);width:20px;height:20px}
 .daysum .ds.met b{color:var(--gold);text-shadow:0 0 10px rgba(255,207,77,.4)}
 .daysum .ds.met::after{content:'✨';position:absolute;top:-8px;right:-3px;font-size:12px;animation:sparkle 1.9s ease-in-out infinite}
 @keyframes sparkle{0%,100%{transform:scale(1) rotate(0deg);opacity:.85}50%{transform:scale(1.3) rotate(14deg);opacity:1}}
-body.light .daysum .ds.met b{color:#b8860b;text-shadow:0 0 8px rgba(184,134,11,.3)}
+body.light .daysum .ds.met b{color:var(--gold);text-shadow:none}
 
 /* ---------- Progress ---------- */
 .rangebar{margin-bottom:12px}
@@ -403,7 +455,7 @@ body.light .daysum .ds.met b{color:#b8860b;text-shadow:0 0 8px rgba(184,134,11,.
 .pstat b{display:block;font-size:20px;font-weight:800;letter-spacing:-.3px}
 .pstat b small{font-size:12px;font-weight:700;color:var(--dim)}
 .pstat span{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
-.streakfire{color:var(--acc)}
+.streakfire{color:var(--acc-ink)}
 
 /* ---------- Settings ---------- */
 .swatches{display:flex;gap:10px;flex-wrap:wrap}
@@ -448,9 +500,9 @@ body.light .nag{border-color:#8A6008}
 /* ---------- onboarding ---------- */
 #ob{position:fixed;inset:0;z-index:80;background:var(--bg);display:none;flex-direction:column;padding:calc(env(safe-area-inset-top) + 30px) 22px calc(env(safe-area-inset-bottom) + 22px);overflow-y:auto}
 #ob.open{display:flex}
-.ob-kicker{font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--acc);margin-bottom:10px}
+.ob-kicker{font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--acc-ink);margin-bottom:10px}
 .ob-title{font-family:'Fraunces',ui-serif,Georgia,serif;font-size:34px;font-weight:650;line-height:1.12;letter-spacing:-.5px;margin-bottom:8px}
-.ob-title i{color:var(--acc)}
+.ob-title i{color:var(--acc-ink)}
 .ob-sub{font-size:15px;color:var(--dim);line-height:1.5;margin-bottom:22px}
 .opt-card{
   width:100%;text-align:left;background:var(--card);border:1.5px solid var(--line);border-radius:18px;
@@ -502,11 +554,10 @@ body.light .nag{border-color:#8A6008}
 /* additive-count pill (colour = worst risk class) */
 .ab{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
   min-width:22px;height:22px;border-radius:7px;font-size:11px;font-weight:800;padding:0 5px}
-.ab-0{background:rgba(47,214,113,.15);color:#2fd671}
-.ab-1{background:rgba(245,182,46,.16);color:#d99a13}
-.ab-2{background:rgba(239,126,26,.16);color:#EF7E1A}
-.ab-3{background:rgba(230,62,17,.16);color:#ff6b4a}
-body.light .ab-3{color:#d63515}body.light .ab-0{color:#1d9e52}
+.ab-0{background:rgba(47,214,113,.15);color:var(--ad0)}
+.ab-1{background:rgba(245,182,46,.16);color:var(--ad1)}
+.ab-2{background:rgba(239,126,26,.16);color:var(--ad2)}
+.ab-3{background:rgba(230,62,17,.16);color:var(--ad3)}
 /* additive detail rows (log sheet + day summary) */
 .addrow{display:flex;align-items:center;gap:4px;font-size:13px}
 .addrow+.addrow{border-top:1px solid var(--line)}
@@ -574,7 +625,7 @@ body.light .ab-3{color:#d63515}body.light .ab-0{color:#1d9e52}
   display:flex;align-items:center;justify-content:center;
   background:var(--card2);border:1.5px solid var(--line);color:#fff;
 }
-.est-tick.on{background:var(--acc);border-color:var(--acc)}
+.est-tick.on{background:var(--acc-fill);border-color:var(--acc-fill);color:var(--on-acc)}
 .est-q{width:62px;flex:0 0 auto;text-align:center;padding:9px 4px;font-size:15px;font-weight:700}
 .est-pre{
   background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px;
@@ -582,7 +633,7 @@ body.light .ab-3{color:#d63515}body.light .ab-0{color:#1d9e52}
   font-size:11.5px;line-height:1.55;white-space:pre;overflow-x:auto;margin:0;
 }
 .est-note{font-size:11.5px;line-height:1.5;color:var(--dim);margin:7px 2px 0;padding-left:11px;text-indent:-11px}
-.src-tag.est{background:rgba(95,168,255,.13);color:var(--mp)}
+.src-tag.est{background:rgba(95,168,255,.13);color:var(--mp-ink)}
 </style>
 <style>
 /* ============================================================
@@ -629,7 +680,7 @@ body.light .ab-3{color:#d63515}body.light .ab-0{color:#1d9e52}
    area to ~39 px while the negative margin keeps the visual position
    exactly where it was, so no layout shifts. */
 .linkbtn{
-  font-size:13px;font-weight:700;color:var(--acc);
+  font-size:13px;font-weight:700;color:var(--acc-ink);
   padding:10px 8px;margin:-10px -8px;border-radius:10px;
   transition:background-color var(--t-fast) linear,transform var(--t-fast) var(--e-out);
 }
@@ -652,26 +703,32 @@ body.light .ab-3{color:#d63515}body.light .ab-0{color:#1d9e52}
    here cannot re-parent anything. */
 .page.active{animation:pagein .28s var(--e-out)}
 @keyframes pagein{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
-/* staggered entrance for the top-level blocks of each page */
-.page.active>.card,.page.active>.mealgrp,.page.active>.listcard,
-.page.active>.weekstrip,.page.active>.qrow,.page.active>.daysum,
-.page.active>.datebar,.page.active>.rangebar,.page.active>.pastbanner{
+/* staggered entrance for the top-level blocks of each page.
+   v4.0: keyed to .enter, which switchTab() adds for one beat — NOT to
+   .active, because every save re-renders the page and the whole screen used
+   to cascade in again after each logged food or edited entry. */
+.page.enter>.card,.page.enter>.mealgrp,.page.enter>.listcard,
+.page.enter>.weekstrip,.page.enter>.qrow,.page.enter>.daysum,
+.page.enter>.datebar,.page.enter>.rangebar,.page.enter>.pastbanner,
+.page.enter>.actrow,.page.enter>.nag{
   animation:risein .34s var(--e-out) both;
 }
-.page.active>*:nth-child(1){animation-delay:0ms}
-.page.active>*:nth-child(2){animation-delay:35ms}
-.page.active>*:nth-child(3){animation-delay:70ms}
-.page.active>*:nth-child(4){animation-delay:100ms}
-.page.active>*:nth-child(5){animation-delay:125ms}
-.page.active>*:nth-child(6){animation-delay:145ms}
-.page.active>*:nth-child(n+7){animation-delay:160ms}
+.page.enter>*:nth-child(1){animation-delay:0ms}
+.page.enter>*:nth-child(2){animation-delay:35ms}
+.page.enter>*:nth-child(3){animation-delay:70ms}
+.page.enter>*:nth-child(4){animation-delay:100ms}
+.page.enter>*:nth-child(5){animation-delay:125ms}
+.page.enter>*:nth-child(6){animation-delay:145ms}
+.page.enter>*:nth-child(n+7){animation-delay:160ms}
 @keyframes risein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-/* rows inside a freshly drawn meal card cascade in */
-.mealcard .fr-row{animation:rowin .3s var(--e-out) both}
-.mealcard .fr-row:nth-child(1){animation-delay:20ms}
-.mealcard .fr-row:nth-child(2){animation-delay:45ms}
-.mealcard .fr-row:nth-child(3){animation-delay:70ms}
-.mealcard .fr-row:nth-child(n+4){animation-delay:90ms}
+/* rows inside a freshly shown meal card cascade in */
+.page.enter .mealcard .fr-row{animation:rowin .3s var(--e-out) both}
+.page.enter .mealcard .fr-row:nth-child(1){animation-delay:20ms}
+.page.enter .mealcard .fr-row:nth-child(2){animation-delay:45ms}
+.page.enter .mealcard .fr-row:nth-child(3){animation-delay:70ms}
+.page.enter .mealcard .fr-row:nth-child(n+4){animation-delay:90ms}
+/* …while a row that has just been added or put back gets its own entrance */
+.fr-row.fresh{animation:rowin .36s var(--e-out) both}
 @keyframes rowin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 /* ---- bottom nav (transform/colour ONLY — no box-model changes) ---- */
@@ -729,6 +786,168 @@ nav button.on span{opacity:1}
 }
 @keyframes starpulse{0%,100%{opacity:0}50%{opacity:1}}
 
+/* ============================================================
+   v4.0 LAYER — components added or redrawn in the overhaul.
+   Same rules as the motion layer: nothing here touches the bottom
+   nav's box model (load-bearing on iOS).
+   ============================================================ */
+/* a little air above the title in a browser tab; in the installed app the
+   safe-area inset already provides it */
+header{padding-top:calc(env(safe-area-inset-top) + 4px)}
+.in::placeholder{color:var(--dim);opacity:.85}
+/* selects had appearance:none and NO arrow — nothing said "tap to choose" */
+select.in{padding-right:40px;background-repeat:no-repeat;background-position:right 14px center;background-size:12px 8px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2394948E' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+body.light select.in{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2366655D' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+input[type=date].in{min-height:50px}
+/* segmented controls with many options (5–6 meal slots) wrap instead of
+   squeezing "Pre-workout" onto two lines */
+.seg.many{flex-wrap:wrap}
+.seg.many>button{flex:1 0 30%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}
+/* grouped settings rows */
+.navlist{margin:4px -6px 0}
+.navrow{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:7px 6px;text-align:left;border-radius:12px;
+  transition:background-color var(--t-fast) linear}
+.navrow+.navrow{box-shadow:0 -1px 0 var(--line)}
+.navrow:active{background:var(--card2)}
+.navrow .ni{flex:0 0 34px;height:34px;border-radius:11px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:16px}
+.navrow .nl{flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.25}
+.navrow .nv{flex:0 1 auto;min-width:0;font-size:13px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%}
+.navrow .nc{flex:0 0 auto;color:var(--dim);font-size:20px;line-height:1;opacity:.75;margin-right:2px}
+.tilesbtn{width:100%;margin-bottom:2px;text-align:center}
+.tilesbtn:active .ds{background:var(--card2)}
+/* compact action pills (Diary, Add) */
+.actrow{display:flex;gap:7px;overflow-x:auto;margin:0 -13px 12px;padding:1px 13px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.actrow::-webkit-scrollbar{display:none}
+.pill{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 15px;border-radius:999px;
+  background:var(--card);border:1px solid var(--line);font-size:13.5px;font-weight:700;white-space:nowrap;
+  transition:transform var(--t-fast) var(--e-out),background-color var(--t-fast) linear}
+.pill:active{transform:scale(.96);background:var(--card2)}
+.pill.hl{background:var(--acc-dim);border-color:transparent;color:var(--acc-ink)}
+.daynote{margin-bottom:10px}
+/* week strip v4.0: weekday, date, and a mini ring of that day's calories */
+.wd{gap:5px;padding:7px 0 8px}
+.wd .wd-l{font-size:9.5px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+.wd.today .wd-l{color:var(--acc-ink)}
+.wd .wd-r{position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+  font-size:12.5px;font-weight:800;color:var(--text);letter-spacing:0;text-transform:none}
+.wd:not(.logged) .wd-r{color:var(--dim)}
+.wring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);overflow:visible}
+.wr-track{fill:none;stroke:var(--card2);stroke-width:3.4}
+.wr-arc{fill:none;stroke:var(--acc);stroke-width:3.4;stroke-linecap:round;transition:stroke-dasharray .8s var(--e-out)}
+.wr-arc.star{stroke:var(--gold)}
+.wd.star .wd-r::after{content:'★';position:absolute;top:-7px;right:-7px;font-size:10px;color:var(--gold);
+  text-shadow:0 0 6px rgba(255,207,77,.5)}
+/* micronutrients: the few that need attention, the rest behind a toggle */
+.micro-note{font-size:11.5px;color:var(--dim);margin:2px 2px 6px}
+.microrow .ml{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.showmore{display:block;width:100%;margin-top:8px;padding:10px 0 2px;text-align:center;font-size:13px;font-weight:700;color:var(--acc-ink)}
+/* log sheet: quick amounts + the date row when editing */
+.qamts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+.qamt{min-width:52px;min-height:36px;padding:0 12px;border-radius:11px;background:var(--card2);font-size:13.5px;font-weight:700;color:var(--text);
+  transition:transform var(--t-fast) var(--e-out),background-color var(--t-fast) linear}
+.qamt:active{transform:scale(.94)}
+.qamt.on{background:var(--acc-dim);color:var(--acc-ink)}
+/* search box clear button */
+.searchbox{position:relative;flex:1;min-width:0;display:flex}
+.searchbox .in{padding-right:44px}
+.sclear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:10px;
+  display:none;align-items:center;justify-content:center;color:var(--dim);font-size:14px}
+.searchbox.has .sclear{display:flex}
+.sclear:active{background:var(--card2)}
+input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}
+/* quick add */
+.qa-kcal{font-size:30px;font-weight:800;text-align:center;letter-spacing:-.5px;padding:10px}
+.qa-hint{font-size:12px;color:var(--dim);text-align:center;margin-top:6px;min-height:17px}
+/* range summary under the calorie chart / weight change line */
+.rangesum{display:flex;justify-content:center;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:12.5px;color:var(--dim)}
+.rangesum b{color:var(--text);font-weight:800}
+.pstat b small.delta{font-size:12.5px;font-weight:800;color:var(--amb)}
+.pstat b small.delta.ok{color:var(--grn)}
+/* start-up failure screen */
+.bootfail{position:fixed;inset:0;z-index:95;background:var(--bg);display:flex;flex-direction:column;justify-content:center;
+  padding:calc(env(safe-area-inset-top) + 24px) 26px calc(env(safe-area-inset-bottom) + 24px);text-align:center}
+/* onboarding polish */
+.ob-steps{display:flex;gap:6px;margin-bottom:26px}
+.ob-steps i{width:22px;height:4px;border-radius:2px;background:var(--line)}
+.ob-steps i.on{background:var(--acc)}
+.ob-art{width:84px;height:84px;margin:6px 0 22px}
+.ob-art circle{fill:none;stroke-linecap:round}
+/* ---- iOS 26/27 Liquid Glass top edge (v4.0) ----
+   On iOS 27 home-screen apps WebKit samples the top few pixels of the page:
+   with an OPAQUE fixed element there it extends that element's colour into
+   the status bar; without one it lays a progressive blur reaching ~40pt BELOW
+   the safe-area inset — straight across the title ("washed out top"). There
+   is no meta or CSS switch for it. #sbar is that opaque fixed element: iOS
+   only, portrait only (landscape has no status bar), and it dims with an
+   open sheet so the sample never turns translucent. */
+#sbar{display:none;position:fixed;left:0;right:0;top:0;z-index:55;pointer-events:none;
+  height:max(env(safe-area-inset-top),8px);background:var(--bgtop);
+  transition:background-color var(--t-med) linear}
+html.ios #sbar{display:block}
+@media (orientation:landscape){html.ios #sbar{display:none}}
+body.has-sheet #sbar{background:#0A0B0D;background:color-mix(in srgb,var(--bgtop) 45%,#000)}
+/* a sheet fading out no longer swallows the next tap */
+.overlay.closing{pointer-events:none}
+/* ---- landscape safe areas: the Dynamic Island sits on a SIDE edge ---- */
+header{padding-left:max(16px,calc(env(safe-area-inset-left) + 8px));padding-right:max(16px,calc(env(safe-area-inset-right) + 8px))}
+main{padding-left:max(13px,calc(env(safe-area-inset-left) + 6px));padding-right:max(13px,calc(env(safe-area-inset-right) + 6px))}
+@media (max-width:380px){main{padding-left:max(10px,calc(env(safe-area-inset-left) + 6px));padding-right:max(10px,calc(env(safe-area-inset-right) + 6px))}}
+nav{margin-left:max(14px,calc(env(safe-area-inset-left) + 6px));margin-right:max(14px,calc(env(safe-area-inset-right) + 6px))}
+.sheet{padding-left:max(16px,calc(env(safe-area-inset-left) + 8px));padding-right:max(16px,calc(env(safe-area-inset-right) + 8px))}
+/* ---- keyboard-aware sheets (v4.0) ----
+   iOS never shrinks the layout viewport for the on-screen keyboard (Android
+   Chrome no longer does either), so a bottom sheet sat BEHIND it — the Log
+   button of Quick add, the Save of a note. kbSync() publishes how much of the
+   viewport the keyboard covers (--kb) and how tall the visible part is (--vvh). */
+.overlay{padding-bottom:var(--kb,0px);
+  transition:opacity var(--t-med) var(--e-out),padding-bottom .22s var(--e-out)}
+.sheet{max-height:min(88%,calc(var(--vvh,100vh) - 14px))}
+/* the sheet's main action stays in reach: pinned to the bottom of the sheet
+   while the content above it scrolls — and so, with the keyboard up, it sits
+   right on top of the keyboard instead of somewhere behind it */
+.sheet-body .stick{position:sticky;bottom:0;z-index:2;box-shadow:0 -14px 14px -4px var(--sheet),0 0 0 3px var(--sheet)}
+/* wide screens — a phone on its side, a tablet, a desktop browser: one
+   comfortable centred column instead of a hero card stretched to 1,700px.
+   Only ≥700px, so neither phone is affected in portrait. */
+@media (min-width:700px){
+  .page,.hbar{max-width:600px;margin-left:auto;margin-right:auto}
+  nav{align-self:center;width:min(600px,calc(100% - 28px))}
+  .overlay{justify-content:center}
+  .sheet{max-width:640px}
+  #ob{padding-left:max(22px,calc(50vw - 260px));padding-right:max(22px,calc(50vw - 260px))}
+  .toast{max-width:520px}
+}
+/* Safari 27 turned scroll anchoring on. Re-renders here replace whole pages,
+   and the app was built (and field-tested on iOS 26) without anchoring —
+   keep it that way rather than let the two engines disagree on where a
+   re-rendered list lands. */
+main,.sheet-body{overflow-anchor:none}
+/* iOS: an appearance:none date field centres its text and can collapse */
+input[type=date].in{display:block}
+input[type=date].in::-webkit-date-and-time-value{text-align:left}
+/* ---- trusted-tap haptics (iOS 26.5+/27, see hapticTap) ---- */
+.hx-host{position:relative}
+.hx{position:absolute;inset:0;border-radius:inherit;z-index:1;-webkit-tap-highlight-color:transparent}
+.hx-host:disabled .hx{pointer-events:none}
+.hx-sw{position:absolute;left:0;top:0;width:1px;height:1px;margin:0;opacity:0;visibility:hidden;pointer-events:none}
+/* sheets opened FROM onboarding (restore a backup) must sit above it, and
+   messages above everything */
+body.ob-open .overlay{z-index:85}
+#toasts,#snack{z-index:90}
+/* the nag, re-laid: the button moves under the text so the title gets the
+   full width instead of wrapping beside two buttons */
+.nag{display:grid;grid-template-columns:auto 1fr auto;column-gap:11px;row-gap:9px;align-items:start}
+.nag-i{grid-row:1/span 2;padding-top:1px}
+.nag>.grow{grid-column:2;grid-row:1}
+.nag-x{grid-column:3;grid-row:1;margin:-6px -4px 0 0}
+.nag-go{grid-column:2;grid-row:2;justify-self:start;min-height:36px;padding:8px 14px}
+.nag-t{font-size:14px}
+/* sheets: keyboards and screen readers */
+.sheet:focus{outline:none}
+/* a light-theme press state that is actually visible */
+body.light .navrow:active,body.light .pill:active{background:#E6E3D9}
+
 /* ---- accessibility: honour the OS reduced-motion setting ----
    Durations collapse rather than being removed, so animation
    fill-modes still resolve to their final state (elements that
@@ -744,6 +963,14 @@ nav button.on span{opacity:1}
 </style>
 </head>
 <body>
+<script>/* platform marks before first paint (v4.0): html.ios drives the iOS 27
+   status-bar strip (#sbar), html.standalone the home-screen-only fixes */
+try{var d=document.documentElement;
+if(/iP(hone|od|ad)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1))d.classList.add('ios');
+if(navigator.standalone===true||matchMedia('(display-mode: standalone)').matches)d.classList.add('standalone');}catch(e){}</script>
+<div id="sbar" aria-hidden="true"></div>
+<script>/* first paint in the saved theme (v4.0) — see applyTheme() */
+try{var L=JSON.parse(localStorage.getItem('mlLook')||'null');if(L&&L.d){var lt=L.t==='light'||(L.t==='auto'&&matchMedia('(prefers-color-scheme: light)').matches);if(lt)document.body.classList.add('light');var v=lt?L.l:L.d;for(var k in v)document.body.style.setProperty(k,v[k]);var m=document.querySelector('meta[name=theme-color]');if(m&&L.bar)m.setAttribute('content',lt?L.bar.light:L.bar.dark);}}catch(e){}</script>
 <header>
   <div class="hbar">
     <div class="grow">
@@ -761,7 +988,8 @@ nav button.on span{opacity:1}
   <div class="page" id="pg-settings"></div>
 </main>
 <nav id="nav"></nav>
-<div id="toasts"></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="snack" aria-live="polite"></div>
 <div id="scanov">
   <video id="scanvid" playsinline muted></video>
   <div class="scanbox"></div>
@@ -801,7 +1029,7 @@ nav button.on span{opacity:1}
                          prof:{age,sex,cm,kg,act}, onboard, seedVer}
    Export/import = JSON snapshot of all stores (order-insensitive verify).
    ================================================================== */
-const APP_VER='3.3';   // shown in Settings — check which build a device runs
+const APP_VER='4.0';   // shown in Settings — check which build a device runs
 const DB_NAME='macrolog';
 /* meal slots are user-configurable (rename the core four, add up to two
    extras) — entries store the slot id, so renames apply retroactively */
@@ -863,7 +1091,9 @@ const microRDA=(key)=>{
   const ov=(S.set.microT||{})[key];
   return ov>0?ov:microDefault(key);
 };
-const DEF={name:'',theme:'dark',accent:'bronze',
+/* theme: 'auto' (follow the phone) | 'dark' | 'light'. New installs follow the
+   phone; every existing install has its choice saved, so none of them moves. */
+const DEF={name:'',theme:'auto',accent:'bronze',
   t:{kcal:2200,p:150,c:230,f:70},
   t2:null,t2days:[],          // optional training-day targets + weekdays (0=Sun)
   prof:{age:25,sex:'m',cm:178,kg:75,act:1.55},
@@ -877,14 +1107,16 @@ function targetFor(ds){
 /* net-carb display mode: shown carbs = carbs − fibre (data stays raw) */
 const dispC=m=>S.set.netCarbs?Math.max((m.c||0)-(m.fib||0),0):(m.c||0);
 const carbLbl=()=>S.set.netCarbs?'Net carbs':'Carbs';
-/* accent palettes: [dark accent, dark accent-light, light-mode accent] */
+/* accent palettes: [dark accent, dark accent-light, light-mode accent,
+   light-mode ink]. The ink is the light theme's accent for TEXT and filled
+   controls — each measured ≥5.3:1 against white text and the light page. */
 const ACCENTS={
-  bronze:['#C9A96D','#E8CFA0','#A9884D'],
-  ember:['#E0714F','#F5A084','#C25636'],
-  mint:['#6FCF97','#A3E4BE','#3E9E68'],
-  sky:['#5FA8FF','#9CCBFF','#2E7FE0'],
-  violet:['#B07AFF','#D5B3FF','#9257E8'],
-  rose:['#FF7AA2','#FFB3C9','#E05580'],
+  bronze:['#C9A96D','#E8CFA0','#A9884D','#7E5F28'],
+  ember:['#E0714F','#F5A084','#C25636','#A4442A'],
+  mint:['#6FCF97','#A3E4BE','#3E9E68','#23794A'],
+  sky:['#5FA8FF','#9CCBFF','#2E7FE0','#1F63B8'],
+  violet:['#B07AFF','#D5B3FF','#9257E8','#7443C6'],
+  rose:['#FF7AA2','#FFB3C9','#E05580','#B23560'],
 };
 const ACTIVITIES=[[1.2,'Sedentary — desk job, little exercise'],
   [1.375,'Light — 1–3 workouts/week'],
@@ -1089,30 +1321,117 @@ async function storageReport(){
 }
 const fmtBytes=b=>!b?'0 KB':b>=1048576?(b/1048576).toFixed(b>=10485760?0:1)+' MB':Math.round(b/1024)+' KB';
 
-/* ---------------- IndexedDB ---------------- */
-let db=null;
+/* ---------------- IndexedDB ----------------
+   v4.0: the connection heals itself. iOS in particular drops a backgrounded
+   PWA's IndexedDB connection ("Connection to Indexed Database server lost"),
+   after which every transaction on the stale handle throws — the app looked
+   fine but silently stopped saving until it was relaunched. Every operation
+   now goes through dbRun(), which reopens the database and retries ONCE when
+   the handle is dead. Retrying is safe because every write here is idempotent
+   (put by key, delete by key, clear).
+
+   Writes resolve on the TRANSACTION's complete event, not the request's
+   success: a request can succeed and its transaction still fail to commit
+   (quota), and "saved" must mean saved.
+
+   DB_VER stays 1 on purpose. Every store this build needs already exists, and
+   an older build asked to open a NEWER version fails outright — bumping it
+   would turn "roll the deploy back" into "the app won't start". */
+const DB_VER=1;
+let db=null,dbOpening=null;
 function openDB(){
-  return new Promise((res,rej)=>{
-    const r=indexedDB.open(DB_NAME,1);
-    r.onupgradeneeded=e=>{
-      const d=e.target.result;
-      d.createObjectStore('foods',{keyPath:'id'});
-      d.createObjectStore('entries',{keyPath:'id'});
-      d.createObjectStore('meals',{keyPath:'id'});
-      d.createObjectStore('body',{keyPath:'id'});
-      d.createObjectStore('kv');
+  if(db)return Promise.resolve(db);
+  if(dbOpening)return dbOpening;
+  dbOpening=new Promise((res,rej)=>{
+    let r;
+    try{r=indexedDB.open(DB_NAME,DB_VER);}catch(e){dbOpening=null;rej(e);return;}
+    r.onupgradeneeded=()=>{
+      // first run only (v1 has never changed) — guarded so it can never
+      // throw on a store that already exists
+      const d=r.result;
+      for(const s of['foods','entries','meals','body'])
+        if(!d.objectStoreNames.contains(s))d.createObjectStore(s,{keyPath:'id'});
+      if(!d.objectStoreNames.contains('kv'))d.createObjectStore('kv');
     };
-    r.onsuccess=()=>{db=r.result;res(db)};
-    r.onerror=()=>rej(r.error);
+    r.onsuccess=()=>{
+      const d=r.result;
+      // a future build upgrading the schema in another tab: step aside rather
+      // than block it, and let the next operation reopen
+      d.onversionchange=()=>{try{d.close();}catch(e){}if(db===d)db=null;};
+      d.onclose=()=>{if(db===d)db=null;};   // closed by the browser, not by us
+      db=d;dbOpening=null;res(d);
+    };
+    r.onerror=()=>{dbOpening=null;rej(r.error);};
   });
+  return dbOpening;
 }
-const req=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)});
-const store=(s,m)=>db.transaction(s,m||'readonly').objectStore(s);
-const allOf=s=>req(store(s).getAll());
-const dbPut=(s,v,k)=>req(store(s,'readwrite').put(v,k));
-const dbDel=(s,k)=>req(store(s,'readwrite').delete(k));
-const dbClear=s=>req(store(s,'readwrite').clear());
-const kvGet=k=>req(store('kv').get(k));
+const txDone=tx=>new Promise((res,rej)=>{
+  tx.oncomplete=()=>res();
+  tx.onabort=tx.onerror=()=>rej(tx.error||new DOMException('Transaction aborted','AbortError'));
+});
+// the error names a dead or dying connection produces across engines
+const DB_DEAD=new Set(['InvalidStateError','UnknownError','TransactionInactiveError','AbortError']);
+/* run fn(tx) in one transaction over `stores`; resolves with fn's return
+   value once the transaction has COMMITTED (writes) or the reads are in */
+async function dbRun(stores,mode,fn){
+  for(let attempt=0;;attempt++){
+    const d=await openDB();
+    try{
+      const tx=d.transaction(stores,mode);
+      const done=txDone(tx);
+      done.catch(()=>{});            // observed below; this just keeps it quiet
+      let out;
+      // a throw part-way through must not commit the half that already ran
+      try{out=fn(tx);}catch(e){try{tx.abort();}catch(_){}throw e;}
+      await done;
+      if(mode==='readwrite')syncPing();
+      return out;
+    }catch(e){
+      if(attempt>0||!e||!DB_DEAD.has(e.name))throw e;
+      try{d.close();}catch(_){}
+      if(db===d)db=null;
+    }
+  }
+}
+// single-request helper: the request's result, after its transaction completes
+const dbOne=(s,mode,op)=>dbRun(s,mode,tx=>{
+  const r=op(tx.objectStore(s)),box={};
+  r.onsuccess=()=>{box.v=r.result;};
+  return box;
+}).then(b=>b.v);
+/* ---- other open tabs/windows (v4.0) ----
+   Settings and notes are saved as whole objects, so a second MacroLog tab
+   holding a stale copy would overwrite whatever this one just saved. Every
+   committed write pings the others; a pinged tab reloads its data before the
+   user can act in it (on becoming visible, or at once if already idle). */
+const SYNC=('BroadcastChannel' in window)?new BroadcastChannel('macrolog-sync'):null;
+let syncT=0;
+function syncPing(){
+  if(!SYNC)return;
+  clearTimeout(syncT);
+  syncT=setTimeout(()=>{try{SYNC.postMessage({t:'changed'});}catch(e){}},120);
+}
+if(SYNC)SYNC.onmessage=e=>{
+  if(e.data&&e.data.t==='changed'){S.stale=true;resyncIfIdle();}
+};
+async function resyncIfIdle(){
+  if(!S.stale||!S.booted||document.hidden||document.querySelector('.overlay'))return;
+  S.stale=false;
+  try{
+    await loadAll({resync:true});
+    BK.last=(await kvGet('lastBackupAt'))||null;
+    BK.snooze=(await kvGet('backupSnooze'))||0;
+    applyTheme();
+    renderTab(S.tab);
+  }catch(err){reportError(err);}
+}
+document.addEventListener('visibilitychange',resyncIfIdle);
+addEventListener('focus',resyncIfIdle);
+const allOf=s=>dbOne(s,'readonly',st=>st.getAll());
+const dbPut=(s,v,k)=>dbOne(s,'readwrite',st=>st.put(v,k));
+const dbDel=(s,k)=>dbOne(s,'readwrite',st=>st.delete(k));
+const dbClear=s=>dbOne(s,'readwrite',st=>st.clear());
+const kvGet=k=>dbOne('kv','readonly',st=>st.get(k));
 const kvPut=(k,v)=>dbPut('kv',v,k);
 
 /* ---------------- app state ---------------- */
@@ -1129,6 +1448,8 @@ const S={
   addCtx:null,        // {date, meal} target when adding from Diary/meal +
   offline:!navigator.onLine,
   searchSeq:0,        // debounce/race guard for OFF search
+  booted:false,       // boot() finished — cross-tab resyncs wait for this
+  stale:false,        // another tab changed the data; reload before next use
 };
 
 /* ---------------- tiny helpers ---------------- */
@@ -1166,12 +1487,36 @@ const esc=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const IS_IOS=/iP(hone|od|ad)/.test(navigator.userAgent)||
   (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 /* Haptics: Android/Chrome has the real Vibration API; iOS WebKit has none,
-   where clicking a hidden switch-checkbox is the only thing that buzzes. */
+   where toggling a hidden switch-checkbox is the only thing that buzzes.
+   v4.0: since iOS 26.5 — and on iOS 27 — a script-issued click on that switch
+   no longer buzzes; only a REAL tap landing on the switch's <label> does.
+   So the key buttons carry a transparent label (hapticTap) and buzz at the
+   moment of touch; the scripted path stays for older iOS and stands down when
+   a tap has just buzzed, so nothing buzzes twice. */
+let HX_LAST=0;
 function haptic(){
   try{
     if(!IS_IOS&&navigator.vibrate){navigator.vibrate(12);return;}
+    if(Date.now()-HX_LAST<1500)return;
     HAPTIC_SW.click();
   }catch(e){}
+}
+function hapticTap(btn){
+  if(!IS_IOS||!btn)return btn;
+  const sw=h('input',{type:'checkbox',class:'hx-sw',tabindex:'-1','aria-hidden':'true'});
+  sw.setAttribute('switch','');
+  // the label forwards the tap to the switch as a TRUSTED click (that is what
+  // buzzes); stopped here so it never climbs back into the button's handler
+  sw.addEventListener('click',e=>{e.stopPropagation();HX_LAST=Date.now();});
+  btn.classList.add('hx-host');
+  btn.append(h('label',{class:'hx','aria-hidden':'true'},sw));
+  return btn;
+}
+// relabel a button without dropping its haptic overlay
+function btnText(btn,txt){
+  const hx=btn.querySelector(':scope>.hx');
+  btn.textContent=txt;
+  if(hx)btn.append(hx);
 }
 
 /* nutrient math — generic over the ZERO vector so new nutrients ride along */
@@ -1200,12 +1545,23 @@ function reindex(){
     a.push(en);
   }
   for(const a of S.byDate.values())a.sort((x,y)=>x.ts-y.ts);
+  DT.clear();
 }
 const entriesFor=ds=>S.byDate.get(ds)||[];
+/* v4.0: day totals are memoised. One Today render asked for several hundred
+   of them (week strip, insights over every micro, the 400-day streak scan),
+   each re-summing every entry of its day — with years of history that is the
+   bulk of the render. The cache is dropped whenever entries or foods change
+   (reindex / saveFood / loadAll), and callers get a copy so none can poison it. */
+const DT=new Map();
 function dayTotals(ds){
-  let t={...ZERO};
-  for(const en of entriesFor(ds))t=addMac(t,entryMacros(en));
-  return t;
+  let t=DT.get(ds);
+  if(!t){
+    t={...ZERO};
+    for(const en of entriesFor(ds))t=addMac(t,entryMacros(en));
+    DT.set(ds,t);
+  }
+  return {...t};
 }
 // entry amount → human text ("2 × 1 large egg (50g)" / "150 g")
 function amtLabel(en){
@@ -1218,24 +1574,77 @@ function amtLabel(en){
 
 /* ---------------- sheets / dialogs / toasts ---------------- */
 const REDUCED=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* ---- back button (v4.0) ----
+   Android's back button/gesture used to leave the app — or drop out of the
+   installed window — with a sheet still open, taking any half-typed entry
+   with it. Open layers (sheets, the scanner) now sit on ONE history entry:
+   pushed when the first layer opens, re-armed while more remain, popped when
+   the last one closes. Back and Escape close the top layer only. The single
+   entry (rather than one per sheet) is what keeps this correct when a sheet
+   closes and the next opens in the same tick, which the app does constantly. */
+const LAYERS=[];
+let popIgnore=false;
+const armed=()=>!!(history.state&&history.state.mlLayer);
+function layerOpen(close){
+  LAYERS.push(close);
+  if(!armed()){try{history.pushState({mlLayer:1},'');}catch(e){}}
+}
+function layerClosed(close){
+  const i=LAYERS.lastIndexOf(close);
+  if(i<0)return;
+  LAYERS.splice(i,1);
+  // deferred: if another layer opens straight away, the entry stays armed
+  if(!LAYERS.length)setTimeout(()=>{
+    if(!LAYERS.length&&armed()){popIgnore=true;history.back();}
+  },0);
+}
+addEventListener('popstate',()=>{
+  if(popIgnore){
+    popIgnore=false;
+    // a layer opened while our own back() was still travelling: re-arm for it
+    if(LAYERS.length&&!armed()){try{history.pushState({mlLayer:1},'');}catch(e){}}
+    return;
+  }
+  const top=LAYERS[LAYERS.length-1];
+  if(!top)return;
+  top();
+  if(LAYERS.length&&!armed()){try{history.pushState({mlLayer:1},'');}catch(e){}}
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&LAYERS.length){e.preventDefault();LAYERS[LAYERS.length-1]();}
+});
+let SHEET_N=0;
 function sheet(title,content,opts={}){
   let closed=false;
+  const prevFocus=document.activeElement;
+  const hid='sh'+(++SHEET_N);
   const ov=h('div',{class:'overlay'});
   const body=h('div',{class:'sheet-body'},content);
   const head=h('div',{class:'sheet-head'},
-    h('h2',{},title),
-    h('button',{class:'sheet-x',onclick:()=>close()},'✕'));
+    h('h2',{id:hid},title),
+    h('button',{class:'sheet-x','aria-label':'Close',onclick:()=>close()},'✕'));
   /* grabber + title form the drag handle. Deliberately NOT the body —
      dragging from a scrollable area fights the scroll and feels broken. */
   const drag=h('div',{class:'sheet-drag'},h('div',{class:'grabber'}),head);
-  const sh=h('div',{class:'sheet'},drag,body);
+  const sh=h('div',{class:'sheet',role:'dialog','aria-modal':'true','aria-labelledby':hid,tabindex:'-1'},drag,body);
   ov.append(sh);
   ov.addEventListener('click',e=>{if(e.target===ov)close();});
   document.body.append(ov);
-  requestAnimationFrame(()=>ov.classList.add('open'));
+  layerOpen(close);
+  document.body.classList.add('has-sheet');   // #sbar dims with the backdrop
+  requestAnimationFrame(()=>{
+    ov.classList.add('open');
+    // focus into the dialog for keyboards/screen readers, unless something
+    // inside already took it (an autofocused field)
+    if(!sh.contains(document.activeElement)){try{sh.focus({preventScroll:true});}catch(e){}}
+  });
   // drag down to dismiss: past ~110 px, or a quick flick
   let sy=null,dy=0,t0=0;
   drag.addEventListener('pointerdown',e=>{
+    /* v4.0: never start a drag from a button. Capturing the pointer on a press
+       that began on ✕ retargeted its click to the header, so with a mouse or
+       trackpad the close button did nothing at all (touch happened to work). */
+    if(e.button>0||(e.target.closest&&e.target.closest('button')))return;
     sy=e.clientY;dy=0;t0=performance.now();
     sh.classList.add('dragging');
     try{drag.setPointerCapture(e.pointerId);}catch(err){}
@@ -1260,7 +1669,17 @@ function sheet(title,content,opts={}){
   function close(){
     if(closed)return;closed=true;
     ov.classList.remove('open');
+    ov.classList.add('closing');
     setTimeout(()=>ov.remove(),REDUCED()?20:380);   // match the slide-out
+    // (a sheet opened in this same tick is not .open yet, so count by .closing)
+    if(!document.querySelector('.overlay:not(.closing)'))document.body.classList.remove('has-sheet');
+    layerClosed(close);
+    // hand focus back to what opened the sheet, if it is still on screen —
+    // never to a text field, which would throw the phone keyboard back up
+    if(prevFocus&&prevFocus.isConnected&&prevFocus!==document.body&&!LAYERS.length&&
+       !(prevFocus.matches&&prevFocus.matches('input,textarea,select'))){
+      try{prevFocus.focus({preventScroll:true});}catch(e){}
+    }
     if(opts.onClose)opts.onClose();
   }
   return close;
@@ -1297,19 +1716,75 @@ function ask(title,msg,okLabel,danger){
     const close=sheet(title,c,{onClose:()=>{if(!done)res(false);}});
   });
 }
+/* Toasts. v4.0: a toast can carry one action (Undo) — those sit at the
+   BOTTOM, above the nav, where a thumb can reach them before they go; plain
+   notices keep the top. Never more than three stacked, and each returns its
+   own dismiss function. */
 function toast(msg,opts={}){
-  const t=h('div',{class:'toast'+(opts.pr?' pr':'')},msg);
-  $('#toasts').append(t);
+  const act=opts.action;
+  const t=h('div',{class:'toast'+(opts.pr?' pr':'')+(opts.err?' err':'')+(act?' act':''),
+    role:opts.err?'alert':'status'},h('span',{class:'toast-m'},msg));
+  let timer=0,gone=false;
+  const dismiss=()=>{
+    if(gone)return;gone=true;clearTimeout(timer);
+    t.classList.remove('in');setTimeout(()=>t.remove(),320);
+  };
+  if(act)t.append(h('button',{class:'toast-a',onclick:()=>{dismiss();act.fn();}},act.label));
+  const box=$(act?'#snack':'#toasts');
+  box.append(t);
+  const all=box.querySelectorAll('.toast');
+  if(all.length>3)all[0].remove();
   requestAnimationFrame(()=>t.classList.add('in'));
-  setTimeout(()=>{t.classList.remove('in');setTimeout(()=>t.remove(),300)},opts.dur||2400);
+  timer=setTimeout(dismiss,opts.dur||(act?5200:2400));
+  return dismiss;
 }
+/* One press, one action (v4.0): the log/copy/commit buttons are async, and a
+   quick double-tap used to run them twice — two identical entries. While a
+   guarded handler is still running, further presses are ignored. */
+function guard(fn){
+  let busy=false;
+  return async function(...a){
+    if(busy)return;
+    busy=true;
+    try{return await fn.apply(this,a);}
+    finally{busy=false;}
+  };
+}
+/* Deletes are instant and undoable (v4.0) rather than silent and final:
+   `restore` puts back exactly what was removed, then the screen redraws. */
+function undoToast(msg,restore){
+  return toast(msg,{action:{label:'Undo',fn:async()=>{
+    try{await restore();renderTab(S.tab);toast('Restored');}
+    catch(e){reportError(e);}
+  }}});
+}
+/* Nothing that fails to save may fail silently. Every write is awaited by an
+   async handler somewhere; if one rejects and nothing catches it, it lands
+   here and the user is told — throttled, so one bad moment is one message. */
+let ERR_LAST=0;
+function reportError(err){
+  console.error(err);
+  const now=Date.now();
+  if(now-ERR_LAST<5000)return;
+  ERR_LAST=now;
+  const n=err&&err.name||'';
+  const m=n==='QuotaExceededError'
+    ?'Storage is full — that change wasn’t saved. Free up space on the phone, then try again.'
+    :DB_DEAD.has(n)||n==='DataError'
+    ?'Couldn’t save to on-device storage. If this keeps happening, close and reopen MacroLog.'
+    :'Something went wrong'+(err&&err.message?' — '+err.message:'')+'.';
+  try{toast(m,{err:true,dur:5600});}catch(e){}
+}
+addEventListener('unhandledrejection',e=>reportError(e.reason));
+// cross-origin script errors arrive with no .error and nothing useful to say
+addEventListener('error',e=>{if(e&&e.error)reportError(e.error);});
 function seg(opts,cur,cb){
-  const el=h('div',{class:'seg'});
+  const el=h('div',{class:'seg'+(opts.length>4?' many':''),role:'group'});
   for(const o of opts){
     const val=Array.isArray(o)?o[0]:o, label=Array.isArray(o)?o[1]:o;
-    const b=h('button',{class:val===cur?'on':'',onclick:()=>{
-      [...el.children].forEach(c=>c.classList.remove('on'));
-      b.classList.add('on');cb(val);
+    const b=h('button',{class:val===cur?'on':'','aria-pressed':val===cur?'true':'false',onclick:()=>{
+      [...el.children].forEach(c=>{c.classList.remove('on');c.setAttribute('aria-pressed','false');});
+      b.classList.add('on');b.setAttribute('aria-pressed','true');cb(val);
     }},label);
     el.append(b);
   }
@@ -1318,21 +1793,36 @@ function seg(opts,cur,cb){
 function labeled(text,field){return h('div',{},h('label',{class:'lbl'},text),field);}
 
 /* ---------------- persistence ops ---------------- */
-async function saveFood(f){S.foods.set(f.id,f);await dbPut('foods',f);}
+async function saveFood(f){S.foods.set(f.id,f);DT.clear();await dbPut('foods',f);}
 async function bumpUse(f){f.used=(f.used||0)+1;f.lastUsed=Date.now();await dbPut('foods',f);}
+/* Memory and storage must agree: a write that fails (storage full, a lost
+   connection that would not come back) is rolled back in memory too, so the
+   screen never shows an entry that will be gone on the next launch. */
 async function logEntry(o){
   const en={id:'e'+uid(),date:o.date,meal:o.meal,foodId:o.foodId,
     amt:o.amt,unit:o.unit,ts:o.ts||Date.now()};
   S.entries.push(en);reindex();
-  await dbPut('entries',en);
+  try{await dbPut('entries',en);}
+  catch(e){S.entries=S.entries.filter(x=>x!==en);reindex();throw e;}
   const f=S.foods.get(en.foodId);
-  if(f)await bumpUse(f);
+  if(f)await bumpUse(f).catch(()=>{});   // a lost use-count is harmless
   return en;
 }
 async function updateEntry(en){reindex();await dbPut('entries',en);}
+// returns the removed entry so the caller can offer Undo
 async function deleteEntry(id){
+  const gone=S.entries.find(e=>e.id===id);
   S.entries=S.entries.filter(e=>e.id!==id);reindex();
-  await dbDel('entries',id);
+  try{await dbDel('entries',id);}
+  catch(e){if(gone){S.entries.push(gone);reindex();}throw e;}
+  return gone;
+}
+// put a deleted entry back exactly as it was (same id, date, meal, ts)
+async function restoreEntry(en){
+  if(!en||S.entries.some(e=>e.id===en.id))return;
+  S.entries.push(en);reindex();
+  try{await dbPut('entries',en);}
+  catch(e){S.entries=S.entries.filter(x=>x!==en);reindex();throw e;}
 }
 
 /* ---------------- header / greeting ---------------- */
@@ -1388,11 +1878,11 @@ function ringsEl(){
   }
   return svg;
 }
-function rstatRow(key,label,color){
+function rstatRow(key,label,color,ink){
   // number and "/ target" are separate nodes so the figure can tween
   // without rebuilding markup on every frame
   const num=h('b',{}),of=h('span',{class:'of'});
-  const val=h('span',{class:'rv num',style:'--metc:'+color},num,of);
+  const val=h('span',{class:'rv num',style:'--metc:'+(ink||color)},num,of);
   RG[key].val=val;RG[key].num=num;RG[key].of=of;
   return h('div',{class:'rstat'},
     h('span',{class:'rdot',style:'background:'+color}),
@@ -1525,6 +2015,7 @@ function fxExplode(x,y,col){
 }
 // big opening volley — first time each day turns into a ⭐ star day
 function fxBurst(){
+  if(REDUCED())return;   // no fireworks for reduced motion — the ⭐ still says it
   if(!FX.cv||!FX.cv.isConnected){FX.pendingBurst=true;return;}
   fxColor();
   for(let i=0;i<4;i++){
@@ -1537,7 +2028,7 @@ function fxBurst(){
 }
 function fxTick(ts){
   FX.raf=0;
-  if(document.hidden||S.tab!=='today'||!FX.cv||!FX.cv.isConnected)return;
+  if(document.hidden||S.tab!=='today'||!FX.cv||!FX.cv.isConnected||FX.onscreen===false)return;
   const c=FX.ctx,w=FX.w,hh=FX.h,t=ts/1000;
   c.clearRect(0,0,w,hh);
   // two soft accent blobs drifting in a slow figure-eight
@@ -1616,9 +2107,22 @@ function fxTick(ts){
     c.globalCompositeOperation='source-over';
   }
   c.globalAlpha=1;
-  FX.raf=requestAnimationFrame(fxTick);
+  // reduced motion: this one frame stays up as a still backdrop
+  if(!REDUCED())FX.raf=requestAnimationFrame(fxTick);
 }
 function fxStart(){if(!FX.raf&&FX.cv)FX.raf=requestAnimationFrame(fxTick);}
+/* v4.0: the loop also rests while the hero is scrolled out of view — reading
+   insights or micros further down no longer costs a 60 fps canvas nobody sees */
+let FX_IO=null;
+function fxObserve(el){
+  FX.onscreen=true;
+  if(!('IntersectionObserver' in window))return;
+  if(FX_IO)FX_IO.disconnect();
+  FX_IO=new IntersectionObserver(es=>{
+    for(const e of es){FX.onscreen=e.isIntersecting;if(FX.onscreen)fxStart();}
+  });
+  FX_IO.observe(el);
+}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)fxStart();});
 
 /* ---------------- adherence & streaks ----------------
@@ -1641,13 +2145,17 @@ function streaks(){
   }
   return {cur,best};
 }
+/* v4.0: averages cover the last seven COMPLETE days. Counting a half-logged
+   today dragged every morning's average down — at breakfast it read as a
+   30–40% deficit that wasn't there. The percentage is against each day's own
+   target, so training days count as the bigger days they are. */
 function weekAvg(){
-  let sum=0,n=0;
-  for(let i=0;i<7;i++){
-    const ds=addDays(todayStr(),-i-0);
-    if(entriesFor(ds).length){sum+=dayTotals(ds).kcal;n++;}
+  let sum=0,tsum=0,n=0;
+  for(const ds of lastNDays(7,1)){
+    if(!entriesFor(ds).length)continue;
+    sum+=dayTotals(ds).kcal;tsum+=targetFor(ds).kcal;n++;
   }
-  return n?{avg:sum/n,n}:null;
+  return n?{avg:sum/n,n,tavg:tsum/n}:null;
 }
 
 /* ---------------- Dashboard tab ----------------
@@ -1681,8 +2189,8 @@ function backupNagCard(){
     h('div',{class:'nag-i'},'🛟'),
     h('div',{class:'grow'},
       h('div',{class:'nag-t'},BK.last==null?'Back up your food diary':'Your backup is '+d+' days old'),
-      h('div',{class:'nag-s'},S.byDate.size+' logged days live only on this device. Browsers can clear app data to free up space — a backup file is what gets it back.')),
-    h('button',{class:'nag-go',onclick:canShareBackup()?shareBackup:downloadExport},'Back up'),
+      h('div',{class:'nag-s'},S.byDate.size+' logged days live only on this phone — a backup file is what brings them back.')),
+    h('button',{class:'nag-go',onclick:canShareBackup()?shareBackup:downloadExport},'Back up now'),
     h('button',{class:'nag-x','aria-label':'Remind me later',onclick:async()=>{
       BK.snooze=Date.now();
       try{await kvPut('backupSnooze',BK.snooze);}catch(e){}
@@ -1706,15 +2214,16 @@ function renderToday(){
   RG.mid=midN;
   ringwrap.append(h('div',{class:'ringmid'},midN,h('div',{class:'rk-l'},'kcal')));
   const stats=h('div',{class:'ringstats'},
-    rstatRow('k','Calories','var(--acc)'),
-    rstatRow('p','Protein','var(--mp)'),
-    rstatRow('c',carbLbl(),'var(--mc)'),
-    rstatRow('f','Fat','var(--mf)'));
+    rstatRow('k','Calories','var(--acc)','var(--acc-ink)'),
+    rstatRow('p','Protein','var(--mp)','var(--mp-ink)'),
+    rstatRow('c',carbLbl(),'var(--mc)','var(--mc-ink)'),
+    rstatRow('f','Fat','var(--mf)','var(--mf-ink)'));
   const remain=h('div',{class:'remain num'});
   RG.remain=remain;RG.remainNum=null;   // rebuilt below; tween state lives in RGPREV
   const hero=h('div',{class:'card hero'},cv,
     h('div',{class:'hero-in'},ringwrap,stats),remain);
   RG.hero=hero;
+  fxObserve(hero);
   pg.append(hero,weekStripEl());
   const nag=backupNagCard();
   if(nag)pg.append(nag);
@@ -1745,24 +2254,38 @@ function avgOver(days,key){
   return n?{avg:s/n,n}:null;
 }
 
+/* v4.0: each day shows its date and a mini ring of calories against that
+   day's own target — the old dot said "something was logged", not how the
+   day went, and a strip of letters never said which date was which. */
 function weekStripEl(){
   const strip=h('div',{class:'weekstrip'});
   for(let i=6;i>=0;i--){
     const ds=addDays(todayStr(),-i);
+    const d=new Date(ds+'T12:00');
     const star=starDay(ds),logged=entriesFor(ds).length>0;
-    const wd=new Date(ds+'T12:00').toLocaleDateString(undefined,{weekday:'narrow'});
-    const mark=star?h('i',{},'⭐'):logged?h('span',{class:'dot2'}):h('i',{style:'opacity:.18'},'·');
+    const kcal=logged?dayTotals(ds).kcal:0,tg=targetFor(ds).kcal;
+    const pct=tg>0?clamp(kcal/tg,0,1):0;
+    const wd=d.toLocaleDateString(undefined,{weekday:'narrow'});
+    const ring=sv('svg',{class:'wring',viewBox:'0 0 36 36','aria-hidden':'true'});
+    ring.append(sv('circle',{class:'wr-track',cx:18,cy:18,r:15.5}));
+    if(logged&&pct>0)ring.append(sv('circle',{class:'wr-arc'+(star?' star':''),cx:18,cy:18,r:15.5,
+      pathLength:100,'stroke-dasharray':(pct*100).toFixed(1)+' 100'}));
     // tap = full nutrition summary for that day (macro split + micro table);
     // the sheet's own button jumps into the Diary for editing
-    strip.append(h('button',{class:'wd'+(i===0?' today':'')+(star?' star':''),
+    strip.append(h('button',{class:'wd'+(i===0?' today':'')+(star?' star':'')+(logged?' logged':''),
+      'aria-label':fmtDayLong(ds)+(logged?' — '+kc(kcal)+' of '+kc(tg)+' kcal':' — nothing logged')+(star?', star day':''),
       onclick:()=>daySummarySheet(ds)},
-      h('span',{},wd),mark));
+      h('span',{class:'wd-l'},wd),
+      h('span',{class:'wd-r num'},ring,String(d.getDate()))));
   }
   return strip;
 }
 
 function quickRowEl(){
   const row=h('div',{class:'qrow'});
+  row.append(h('button',{class:'qchip',onclick:()=>quickAddSheet({date:todayStr(),meal:mealGuess()})},
+    h('span',{class:'qi'},'⚡'),
+    h('div',{},h('b',{},'Quick add'),h('span',{},'just the calories'))));
   row.append(h('button',{class:'qchip',onclick:()=>copyDaySheet(todayStr())},
     h('span',{class:'qi'},'⧉'),
     h('div',{},h('b',{},'Copy yesterday'),h('span',{},'whole day or one meal'))));
@@ -1779,7 +2302,7 @@ function quickRowEl(){
     row.append(h('button',{class:'qchip',onclick:()=>openLogSheet(f)},
       h('div',{},h('b',{},f.name),h('span',{class:'num'},kc((f.per||ZERO).kcal)+' kcal · logged '+f.used+'×'))));
   }
-  if(row.children.length===1)
+  if(row.children.length===2)   // only the two built-in actions so far
     row.append(h('div',{class:'qchip',style:'border-style:dashed'},
       h('div',{},h('b',{class:'dim'},'Your meals & regulars land here'),
       h('span',{},'log a few foods first'))));
@@ -1788,8 +2311,10 @@ function quickRowEl(){
 
 /* rule-based trend insights — plain sentences, max 4, most useful first */
 function insightLines(){
-  const out=[],t=S.set.t;
-  const wk0=avgOver(lastNDays(7),'kcal'),wk1=avgOver(lastNDays(7,7),'kcal');
+  const out=[];
+  // trends compare COMPLETE days (yesterday back), never today's partial log
+  const done7=lastNDays(7,1);
+  const wk0=avgOver(done7,'kcal'),wk1=avgOver(lastNDays(7,8),'kcal');
   let stars=0;
   for(const d of lastNDays(7))if(starDay(d))stars++;
   if(stars)out.push(['⭐','<b>'+stars+' star day'+(stars===1?'':'s')+'</b> this week — targets closely met.']);
@@ -1799,10 +2324,13 @@ function insightLines(){
       ?['⚖️','You’ve eaten <b>'+Math.abs(d)+' '+(d>0?'more':'fewer')+' kcal/day</b> than last week.']
       :['⚖️','Steady week — within <b>100 kcal/day</b> of last week.']);
   }
-  const pr=avgOver(lastNDays(7),'p');
+  const pr=avgOver(done7,'p');
   if(pr&&pr.n>=3){
-    if(pr.avg>=t.p)out.push(['💪','Protein on point — averaging <b>'+g1(pr.avg)+' g/day</b> (target '+g1(t.p)+' g).']);
-    else if(pr.avg<t.p*.75)out.push(['💪','Protein is lagging — <b>'+g1(pr.avg)+' g/day</b> vs your '+g1(t.p)+' g target.']);
+    // the target averaged over the same logged days (training days differ)
+    const lg=done7.filter(d=>entriesFor(d).length);
+    const tp=lg.reduce((a,d)=>a+targetFor(d).p,0)/lg.length;
+    if(pr.avg>=tp)out.push(['💪','Protein on point — averaging <b>'+g1(pr.avg)+' g/day</b> (target '+g1(tp)+' g).']);
+    else if(pr.avg<tp*.75)out.push(['💪','Protein is lagging — <b>'+g1(pr.avg)+' g/day</b> vs your '+g1(tp)+' g target.']);
   }
   // weakest nutrient of the week across ALL tracked micros (limits excluded)
   const TIPS={iron:'red meat, lentils and spinach help',k:'bananas, potatoes and dairy help',
@@ -1814,20 +2342,22 @@ function insightLines(){
   let worst=null;
   for(const[key,label,unit,,,isLimit]of MICROS){
     if(isLimit)continue;
-    const a=avgOver(lastNDays(7),key);
+    const a=avgOver(done7,key);
     if(!a||a.n<3)continue;
     const ratio=a.avg/microRDA(key);
     if(ratio<.6&&(!worst||ratio<worst.ratio))worst={key,label,unit,avg:a.avg,ratio};
   }
-  if(worst)out.push(['🥦','Try to increase your <b>'+worst.label.toLowerCase()+
+  // "vitamin E", "vitamin B12" — only the word "Vitamin" is lower-cased
+  const nmOf=l=>/^Vitamin /.test(l)?'vitamin '+l.slice(8):l.toLowerCase();
+  if(worst)out.push(['🥦','Try to increase your <b>'+nmOf(worst.label)+
     '</b> intake — averaging '+g1(worst.avg)+' '+worst.unit+' of the '+
     g1(microRDA(worst.key))+' '+worst.unit+' guideline; '+TIPS[worst.key]+'.']);
   // ceiling nutrients: flag sustained overshoot
-  const na=avgOver(lastNDays(7),'sod');
+  const na=avgOver(done7,'sod');
   if(na&&na.n>=3&&na.avg>microRDA('sod')*1.15)
     out.push(['🧂','Sodium is averaging <b>'+kc(na.avg)+' mg/day</b> — above the '+kc(microRDA('sod'))+' mg guideline.']);
-  const cf=avgOver(lastNDays(7),'caff');
-  if(cf&&cf.avg>microRDA('caff'))out.push(['☕','Caffeine is averaging <b>'+kc(cf.avg)+' mg/day</b> — above the '+kc(microRDA('caff'))+' mg guideline.']);
+  const cf=avgOver(done7,'caff');
+  if(cf&&cf.n>=2&&cf.avg>microRDA('caff'))out.push(['☕','Caffeine is averaging <b>'+kc(cf.avg)+' mg/day</b> — above the '+kc(microRDA('caff'))+' mg guideline.']);
   // additive exposure: sustained high-risk items are worth a nudge
   let hiAdd=0;
   for(const d of lastNDays(7))hiAdd+=dayAdditiveStats(d).hi;
@@ -1876,12 +2406,56 @@ function microRowsFrag(t){
   return frag;
 }
 const MICRO_FLOOR_NOTE='From logged foods only — many products don’t declare micronutrients, so treat these as a floor, not an exact count.';
+/* v4.0: the dashboard card leads with the handful that need attention —
+   furthest below target, or a ceiling (sodium, caffeine) running high — and
+   keeps the full grouped table one tap away. Thirteen bars every visit
+   pushed everything below them off the screen. The open/closed choice is
+   remembered per device. */
+function microFocusFrag(t,n){
+  const scored=MICROS.map(m=>{
+    const[key,,,,,isLimit]=m,target=microRDA(key),v=t[key]||0;
+    const pct=target>0?v/target:0;
+    return {m,need:isLimit?pct-.75:1-pct};   // limits only surface once >75% used
+  }).filter(x=>x.need>0).sort((a,b)=>b.need-a.need).slice(0,n);
+  const frag=document.createDocumentFragment();
+  for(const{m}of scored){
+    const[key,label,unit,,,isLimit]=m;
+    const target=microRDA(key),v=t[key]||0;
+    const over=isLimit&&v>target;
+    frag.append(h('div',{class:'microrow'},
+      h('span',{class:'ml'},label),
+      h('div',{class:'mbar'},h('div',{class:'mfill'+(over?' warn':''),style:'width:'+Math.round((target>0?clamp(v/target,0,1):0)*100)+'%'})),
+      h('span',{class:'mv num'+(over?' streakfire':'')},g1(v)+' ',h('small',{},(isLimit?'limit ':'/ ')+g1(target)+unit))));
+  }
+  return {frag,n:scored.length};
+}
 function microCardEl(){
   const head=h('h3',{class:'serif'},'Micronutrients today',
     h('button',{class:'linkbtn rt',onclick:microTargetsSheet},'Targets'));
   const card=h('div',{class:'card'},head);
-  card.append(microRowsFrag(dayTotals(todayStr())));
-  card.append(h('p',{class:'tiny dim',style:'margin-top:8px'},MICRO_FLOOR_NOTE));
+  const t=dayTotals(todayStr());
+  let open=false;
+  try{open=localStorage.getItem('mlMicroOpen')==='1';}catch(e){}
+  const body=h('div',{});
+  const tog=h('button',{class:'showmore'});
+  function draw(){
+    body.innerHTML='';
+    if(open)body.append(microRowsFrag(t));
+    else{
+      const f=microFocusFrag(t,5);
+      body.append(h('p',{class:'micro-note'},f.n?'Furthest from target today':'Every tracked nutrient is on target today ✓'));
+      body.append(f.frag);
+    }
+    tog.textContent=open?'Show fewer ▴':'Show all '+MICROS.length+' ▾';
+    tog.setAttribute('aria-expanded',open?'true':'false');
+  }
+  tog.addEventListener('click',()=>{
+    open=!open;
+    try{localStorage.setItem('mlMicroOpen',open?'1':'0');}catch(e){}
+    draw();
+  });
+  draw();
+  card.append(body,tog,h('p',{class:'tiny dim',style:'margin-top:8px'},MICRO_FLOOR_NOTE));
   return card;
 }
 // custom per-micro daily targets (blank = sex-based default)
@@ -1897,7 +2471,7 @@ function microTargetsSheet(){
       value:(S.set.microT||{})[key]||'',placeholder:def+' '+unit+(isLimit?' (limit)':'')});
     body.append(labeled(label+' ('+unit+')',inputs[key]));
   }
-  body.append(h('button',{class:'btn primary mt12',onclick:async()=>{
+  body.append(h('button',{class:'btn primary mt12 stick',onclick:async()=>{
     const mt={};
     for(const key of Object.keys(inputs)){
       const v=numOr(inputs[key].value,0);
@@ -1974,7 +2548,9 @@ function daySummarySheet(ds){
     const sp=splitDonut(t);
     if(sp){
       const leg=h('div',{class:'splitleg num'});
-      [['Protein','var(--mp)',t.p],[carbLbl(),'var(--mc)',t.c],['Fat','var(--mf)',t.f]].forEach(([lb,col,gr],i)=>{
+      // energy split: total carbs carry the energy, so the label says Carbs
+      // even in net-carb mode (it used to say "Net carbs" over total grams)
+      [['Protein','var(--mp)',t.p],['Carbs','var(--mc)',t.c],['Fat','var(--mf)',t.f]].forEach(([lb,col,gr],i)=>{
         leg.append(h('div',{class:'row'},
           h('span',{class:'rdot',style:'background:'+col}),
           h('span',{class:'dim'},lb),
@@ -2016,7 +2592,7 @@ function copyDaySheet(target){
   let src=addDays(target,-1);
   const picks=Object.fromEntries(MEALS.map(([mk])=>[mk,true]));
   const list=h('div',{class:'listcard mt8'});
-  const copyBtn=h('button',{class:'btn primary mt12'});
+  const copyBtn=hapticTap(h('button',{class:'btn primary mt12 stick'}));
   const srcIn=h('input',{type:'date',class:'in',value:src,onchange:e=>{
     if(e.target.value){src=e.target.value;redraw();}
   }});
@@ -2061,21 +2637,22 @@ function copyDaySheet(target){
   function count(){
     const {copy,skip}=copyPlan();
     const n=copy.length;
-    copyBtn.textContent=n
+    btnText(copyBtn,n
       ?'Copy '+n+' item'+(n===1?'':'s')+' to '+(target===todayStr()?'today':fmtDay(target))+
         (skip?' ('+skip+' already there)':'')
-      :skip?'All '+skip+' already there — nothing to copy':'Nothing selected';
+      :skip?'All '+skip+' already there — nothing to copy':'Nothing selected');
     copyBtn.disabled=!n;
     copyBtn.style.opacity=n?'':'0.5';
   }
-  copyBtn.addEventListener('click',async()=>{
+  copyBtn.addEventListener('click',guard(async()=>{
     const {copy,skip}=copyPlan();
+    if(!copy.length)return;   // disabled state, whatever the tap landed on
     for(const en of copy)
       await logEntry({date:target,meal:en.meal,foodId:en.foodId,amt:en.amt,unit:en.unit});
     haptic();close();renderTab(S.tab);
     toast('Copied '+copy.length+' item'+(copy.length===1?'':'s')+
       (skip?' · '+skip+' skipped (already there)':'')+' ✓',{pr:true});
-  });
+  }));
   const close=sheet('Copy a day',h('div',{},
     labeled('Copy from',srcIn),list,copyBtn));
   redraw();
@@ -2093,14 +2670,14 @@ function mealGroupsEl(ds){
     const head=h('div',{class:'mealhead'},
       h('h3',{},label),
       h('span',{class:'mk num'},ens.length?kc(sum.kcal)+' kcal':''),
-      h('button',{class:'madd pen',style:'color:'+(note?'var(--acc)':'var(--dim)'),
+      h('button',{class:'madd pen',style:'color:'+(note?'var(--acc-ink)':'var(--dim)'),
         'aria-label':'Note for '+label,onclick:()=>noteSheet(ds,mk)},'✎'),
       h('button',{class:'madd',onclick:()=>{S.addCtx={date:ds,meal:mk};switchTab('add');}},'+'));
     const card=h('div',{class:'mealcard'});
     if(note)card.append(h('div',{class:'note-line'},note));
     if(!ens.length)card.append(h('div',{class:'mealempty'},h('i',{},'Nothing logged yet — tap + to add')));
     else for(const en of ens)card.append(frRow(en));
-    frag.append(h('div',{class:'mealgrp fadein'},head,card));
+    frag.append(h('div',{class:'mealgrp'},head,card));
   }
   return frag;
 }
@@ -2121,12 +2698,21 @@ function frRow(en){
     h('div',{class:'fr-name'},f?f.name:'(deleted food)'),
     h('div',{class:'fr-sub',html:sub}));
   const kcalEl=h('div',{class:'fr-kcal num'},h('b',{},kc(m.kcal)),h('span',{},'kcal'));
-  const slide=h('div',{class:'fr-slide'},frThumb(f),mid,kcalEl);
+  /* keyboard/switch access (v4.0): the row was pointer-only, so without a
+     touchscreen an entry could not be opened at all */
+  const slide=h('div',{class:'fr-slide',tabindex:'0',role:'button',
+    'aria-label':'Edit '+(f?f.name:'deleted food')+', '+kc(m.kcal)+' kcal',
+    onkeydown:e=>{
+      if(e.key==='Enter'||e.key===' '){e.preventDefault();editEntrySheet(en);}
+      else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();acts.querySelector('.fa-d').click();}
+    }},frThumb(f),mid,kcalEl);
   const acts=h('div',{class:'fr-acts'},
     h('button',{class:'fa-e',onclick:()=>{closeOpenRow();editEntrySheet(en);}},'Edit'),
     h('button',{class:'fa-d',onclick:async()=>{
-      closeOpenRow();await deleteEntry(en.id);
-      renderTab(S.tab);toast('Entry deleted');
+      closeOpenRow();
+      const gone=await deleteEntry(en.id);
+      renderTab(S.tab);
+      undoToast('Entry deleted',()=>restoreEntry(gone));
     }},'Delete'));
   const row=h('div',{class:'fr-row'},acts,slide);
   let sx=null,sy=0,cur=0,base=0,lock=null;
@@ -2146,20 +2732,29 @@ function frRow(en){
     cur=clamp(base+dx,-132,0);
     slide.style.transform='translateX('+cur+'px)';
   });
+  let tapOK=false;
   const settle=e=>{
     if(sx==null)return;
     slide.classList.remove('drag');
     const moved=Math.abs(e.clientX-sx)>6||Math.abs(e.clientY-sy)>6;
+    tapOK=false;
     if(lock==='x'){
       if(cur<-60){slide.style.transform='translateX(-132px)';openRow=slide;}
       else{slide.style.transform='';if(openRow===slide)openRow=null;}
     }else if(!moved){
       if(openRow)closeOpenRow();
-      else editEntrySheet(en);
+      else tapOK=true;       // the editor opens on the click that follows
     }
     sx=null;lock=null;
   };
   slide.addEventListener('pointerup',settle);
+  /* v4.0: a tap opens the editor on CLICK, not on pointerup. After a touch the
+     browser fires its click at the tapped point only AFTER pointerup — and a
+     sheet opened on pointerup already covered that point, so the click landed
+     on its backdrop and closed it again at once: on a phone, tapping an entry
+     flashed its editor and dropped it. (A mouse click targets the element it
+     started on, which is why this only ever showed up on touchscreens.) */
+  slide.addEventListener('click',()=>{if(tapOK){tapOK=false;editEntrySheet(en);}});
   slide.addEventListener('pointercancel',()=>{
     slide.classList.remove('drag');
     slide.style.transform=(openRow===slide)?'translateX(-132px)':'';
@@ -2458,7 +3053,9 @@ const ADD_RISK_WHY=[
   'Carries the strongest concerns of any class here, whether from regulatory restriction or from findings in research.',
 ];
 const ADD_RISK_LBL=['no known risk','limited risk','moderate risk','high risk'];
-const ADD_COLS=['#2fd671','#f5b62e','#EF7E1A','#ff6b4a'];
+// theme-aware (see --ad0…--ad3): the old hex values were dark-theme neon
+// used as TEXT, 1.6–2.6:1 on the light theme's white cards
+const ADD_COLS=['var(--ad0)','var(--ad1)','var(--ad2)','var(--ad3)'];
 /* ADD_DB groups families under one shared name (all the sulphites are
    "Sulphites", all the parabens "Parabens"). Writing a note for one member
    should cover its siblings rather than duplicating the text per code —
@@ -2581,12 +3178,7 @@ async function fdcSearch(q){
     throw e;
   }
   const j=await r.json();
-  const out=[];
-  for(const x of j.foods||[]){
-    const f=fdcToFood(x);
-    if(f)out.push(await cacheOffFood(f));
-  }
-  return out;
+  return cacheFoods((j.foods||[]).map(fdcToFood).filter(Boolean));
 }
 /* result relevance: OFF's text search returns loosely-related products
    ("ketchup" → ketchup-flavour crisps), so the merged list is re-ranked by
@@ -2648,6 +3240,28 @@ async function netSearch(q){
   return {results:ranked.slice(0,30),off:okOff,fdc:okFdc,
     fdcRate:!okFdc&&!!(fdc.reason&&fdc.reason.rate)};
 }
+/* cache a batch of search results in ONE transaction (v4.0 — a search used
+   to make ~50 sequential writes before its results could show). Same rules
+   as cacheOffFood below: never clobber a record the user edited, and carry
+   over the use counts that drive Recent/Frequent. */
+async function cacheFoods(list){
+  const out=[],writes=[];
+  for(const f of list){
+    const ex=S.foods.get(f.id);
+    if(ex&&ex.edited){out.push(ex);continue;}
+    if(ex){f.used=ex.used;f.lastUsed=ex.lastUsed;}
+    writes.push(f);out.push(f);
+  }
+  if(writes.length){
+    for(const f of writes)S.foods.set(f.id,f);
+    DT.clear();
+    await dbRun(['foods'],'readwrite',tx=>{
+      const st=tx.objectStore('foods');
+      for(const f of writes)st.put(f);
+    });
+  }
+  return out;
+}
 // cache an OFF record without clobbering anything the user touched
 async function cacheOffFood(f){
   const ex=S.foods.get(f.id);
@@ -2684,12 +3298,7 @@ async function offSearch(q){
     const j=await r.json();
     products=j.hits||[];
   }
-  const out=[];
-  for(const p of products){
-    const f=offToFood(p);
-    if(f)out.push(await cacheOffFood(f));
-  }
-  return out;
+  return cacheFoods(products.map(offToFood).filter(Boolean));
 }
 
 /* ================= Add tab ================= */
@@ -2703,11 +3312,29 @@ function renderAdd(){
       h('span',{class:'grow'},'Adding to '+MEAL_NAME[c.meal]+' · '+(c.date===todayStr()?'Today':fmtDay(c.date))),
       h('button',{style:'font-weight:800;color:var(--amb)',onclick:()=>{S.addCtx=null;renderAdd();}},'✕')));
   }
-  const inp=h('input',{class:'in',type:'search',placeholder:'Search foods…',
-    autocomplete:'off',autocorrect:'off',oninput:e=>onSearchInput(e.target.value)});
-  const scan=h('button',{class:'scanbtn',html:SVG_BARCODE,onclick:openScanner});
-  pg.append(h('div',{class:'searchwrap'},inp,scan),
-    h('button',{class:'btn sm mt8',onclick:pasteEstimateSheet},'📋 Paste a nutrition estimate'),
+  const box=h('div',{class:'searchbox'});
+  const inp=h('input',{class:'in',type:'search',placeholder:'Search foods…','aria-label':'Search foods',
+    autocomplete:'off',autocorrect:'off',autocapitalize:'off',spellcheck:'false',enterkeyhint:'search',
+    oninput:e=>{box.classList.toggle('has',!!e.target.value);onSearchInput(e.target.value);},
+    // Enter searches now and drops the keyboard so the results can be seen
+    onkeydown:e=>{
+      if(e.key!=='Enter')return;
+      e.preventDefault();
+      const q=e.target.value.trim();
+      if(q.length>=2){clearTimeout(SEARCH_T);doSearch(q);}
+      e.target.blur();
+    }});
+  const clr=h('button',{class:'sclear','aria-label':'Clear search',onclick:()=>{
+    inp.value='';box.classList.remove('has');onSearchInput('');inp.focus();
+  }},'✕');
+  box.append(inp,clr);
+  const scan=h('button',{class:'scanbtn',html:SVG_BARCODE,'aria-label':'Scan a barcode',onclick:openScanner});
+  pg.append(h('div',{class:'searchwrap'},box,scan),
+    h('div',{class:'actrow'},
+      h('button',{class:'pill hl',onclick:()=>quickAddSheet()},'⚡ Quick add'),
+      h('button',{class:'pill',onclick:pasteEstimateSheet},'📋 Paste estimate'),
+      h('button',{class:'pill',onclick:()=>customFoodSheet()},'＋ Create food'),
+      h('button',{class:'pill',onclick:importRecipeSheet},'✂️ Import recipe')),
     h('div',{id:'add-results'}));
   renderAddHome();
 }
@@ -2785,21 +3412,49 @@ function renderAddHome(){
   const mcard=h('div',{class:'listcard'});
   for(const m of mls)mcard.append(mealRowBtn(m));
   if(!mls.length)mcard.append(h('div',{class:'mealempty'},h('i',{},'Combine foods into one-tap meals')));
-  box.append(addSec('My Meals',null,'+ New',()=>recipeSheet()),mcard,
-    h('button',{class:'btn sm mt8',onclick:importRecipeSheet},'✂️ Import recipe from text'));
+  box.append(addSec('My Meals',null,'+ New',()=>recipeSheet()),mcard);
+  /* v4.0: My Foods shows the 8 newest and expands in place — it used to
+     silently stop at 30, leaving older foods reachable only by search */
   const mine=[...S.foods.values()].filter(f=>f.src==='custom'&&!f.hidden)
     .sort((a,b)=>b.ts-a.ts);
   const fcard=h('div',{class:'listcard'});
-  for(const f of mine.slice(0,30))
-    fcard.append(foodRowBtn(f,f.origin==='paste'?['EST','est']:['MINE','mine'],()=>openLogSheet(f)));
+  const tag=f=>f.origin==='paste'?['EST','est']:['MINE','mine'];
+  for(const f of mine.slice(0,8))fcard.append(foodRowBtn(f,tag(f),()=>openLogSheet(f)));
   if(!mine.length)fcard.append(h('div',{class:'mealempty'},h('i',{},'Your own foods — works fully offline')));
-  box.append(addSec('My Foods',null,'+ Create',()=>customFoodSheet()),fcard);
-  const lib=[...S.foods.values()].filter(f=>f.src==='seed'&&!f.hidden&&!f.lastUsed).slice(0,12);
+  box.append(addSec('My Foods',mine.length>8?mine.length+' saved':null,'+ Create',()=>customFoodSheet()),fcard);
+  if(mine.length>8){
+    const more=h('button',{class:'showmore',onclick:()=>{
+      for(const f of mine.slice(8))fcard.append(foodRowBtn(f,tag(f),()=>openLogSheet(f)));
+      more.remove();
+    }},'Show all '+mine.length+' ▾');
+    box.append(more);
+  }
+  const lib=[...S.foods.values()].filter(f=>f.src==='seed'&&!f.hidden&&!f.lastUsed).slice(0,8);
   if(lib.length){
     const lcard=h('div',{class:'listcard'});
     for(const f of lib)lcard.append(foodRowBtn(f,null,()=>openLogSheet(f)));
     box.append(addSec('Staples',SEED_FOODS.length+' built in — search finds them all'),lcard);
   }
+}
+/* v4.0 local matching: every word of the query must appear somewhere in the
+   food's name or brand, in any order, accents ignored. The old test was one
+   whole-string substring, so "rice cooked" could not find "White Rice
+   (cooked)" and "creme fraiche" missed "Crème fraîche". */
+const FOLD=new WeakMap();
+const fold=s=>{
+  s=String(s||'').toLowerCase();
+  try{s=s.normalize('NFD').replace(/[̀-ͯ]/g,'');}catch(e){}
+  return s;
+};
+function foodHay(f){
+  const key=f.name+'\u0001'+(f.brand||'');
+  let c=FOLD.get(f);
+  if(!c||c.k!==key){c={k:key,v:fold(f.name+' '+(f.brand||''))};FOLD.set(f,c);}
+  return c.v;
+}
+function localMatcher(q){
+  const toks=fold(q).split(/[\s,]+/).filter(Boolean);
+  return f=>{const hay=foodHay(f);return toks.every(t=>hay.includes(t));};
 }
 function onSearchInput(q){
   clearTimeout(SEARCH_T);
@@ -2812,11 +3467,10 @@ async function doSearch(q){
   const box=$('#add-results');
   if(!box)return;
   box.innerHTML='';
-  const ql=q.toLowerCase();
-  const local=[...S.foods.values()].filter(f=>!f.hidden&&
-      (f.name.toLowerCase().includes(ql)||(f.brand||'').toLowerCase().includes(ql)))
+  const ql=fold(q),hit=localMatcher(q);
+  const local=[...S.foods.values()].filter(f=>!f.hidden&&hit(f))
     .sort((a,b)=>{
-      const as=a.name.toLowerCase().startsWith(ql)?0:1,bs=b.name.toLowerCase().startsWith(ql)?0:1;
+      const as=fold(a.name).startsWith(ql)?0:1,bs=fold(b.name).startsWith(ql)?0:1;
       return as-bs||(b.used||0)-(a.used||0);
     }).slice(0,10);
   if(local.length){
@@ -2873,9 +3527,13 @@ function openLogSheet(food,ctx,existing){
   let amt=existing?existing.amt:1;
   let unit=existing?existing.unit:'serv';
   let meal=ctx.meal||mealGuess();
-  const date=ctx.date||todayStr();
+  // editable only when editing: moving an entry to another day (v4.0)
+  let date=(existing&&existing.date)||ctx.date||todayStr();
   const preview=h('div',{class:'row',style:'justify-content:center;gap:14px;margin:4px 0 2px'});
-  const amtIn=h('input',{class:'num',inputmode:'decimal',value:String(amt),oninput:e=>{amt=Math.max(numOr(e.target.value,0),0);upd(false);}});
+  const amtIn=h('input',{class:'num',inputmode:'decimal',enterkeyhint:'done','aria-label':'Amount',value:String(amt),
+    oninput:e=>{amt=Math.max(numOr(e.target.value,0),0);upd(false);},
+    // Enter logs straight from the keyboard
+    onkeydown:e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();logBtn.click();}}});
   function upd(setInput){
     const m=unit==='g'&&food.p100?scaleMac(food.p100,amt/100):scaleMac(food.per,amt);
     // macro-math reporting: kcal recomputed from P/C/F, flagged when the
@@ -2887,6 +3545,18 @@ function openLogSheet(food,ctx,existing){
       '<div class="tiny dim" style="margin-top:5px">Macro math: '+mm+' kcal'+(off15?' — label differs ⚠️':'')+'</div></div>';
     renderNut(m);
     if(setInput)amtIn.value=String(Math.round(amt*100)/100);
+    drawQuick();
+  }
+  /* one-tap amounts (v4.0): the common portions without the stepper —
+     halves and multiples of a serving, or round gram weights */
+  const quick=h('div',{class:'qamts'});
+  function drawQuick(){
+    quick.innerHTML='';
+    const opts=unit==='g'
+      ?[...new Set([50,100,150,200,food.servG?Math.round(food.servG):0].filter(v=>v>0))].sort((a,b)=>a-b).map(v=>[v,v+' g'])
+      :[[.5,'½'],[1,'1'],[1.5,'1½'],[2,'2'],[3,'3']];
+    for(const[v,lb]of opts)quick.append(h('button',{class:'qamt'+(Math.abs(amt-v)<1e-9?' on':''),
+      'aria-label':unit==='g'?v+' grams':v+' servings',onclick:()=>{amt=v;upd(true);}},lb));
   }
   /* full nutrient table for the CURRENT amount — micros per food at last
      (values track the stepper live; % column = share of the daily target) */
@@ -2965,6 +3635,8 @@ function openLogSheet(food,ctx,existing){
   if(food.origin==='paste')body.append(h('p',{class:'tiny dim',style:'margin:0 2px 8px'},
     '📋 From a pasted estimate'+(food.estConf?' · stated confidence '+food.estConf:'')+
     (food.estNote?' — '+food.estNote:'')));
+  if(food.origin==='quick')body.append(h('p',{class:'tiny dim',style:'margin:0 2px 8px'},
+    '⚡ A quick add — numbers typed straight in, not kept in My Foods.'));
   // implausible values get called out before they land in the diary
   if(food.src!=='custom')for(const w of foodWarnings(food))
     body.append(h('div',{class:'pastbanner'},h('span',{class:'grow'},'⚠️ '+w)));
@@ -2977,10 +3649,12 @@ function openLogSheet(food,ctx,existing){
       unit=v;upd(true);unitNote();
     })));
   }
-  body.append(stepper,unitLbl);
-  const logBtn=h('button',{class:'btn primary mt12'});
-  function btnLbl(){logBtn.textContent=(existing?'Save changes':'Log to '+MEAL_NAME[meal])+(date!==todayStr()?' · '+fmtDay(date):'');}
+  body.append(stepper,unitLbl,quick);
+  const logBtn=hapticTap(h('button',{class:'btn primary mt12 stick'}));
+  function btnLbl(){btnText(logBtn,(existing?'Save changes':'Log to '+MEAL_NAME[meal])+(date!==todayStr()?' · '+fmtDay(date):''));}
   body.append(labeled('Meal',seg(MEALS,meal,v=>{meal=v;btnLbl();})));
+  if(existing)body.append(labeled('Day',h('input',{class:'in',type:'date',value:date,
+    onchange:e=>{if(e.target.value){date=e.target.value;btnLbl();}}})));
   body.append(logBtn);
   body.append(nutBtn,nutBox);
   const addSec_=addSection();
@@ -3000,24 +3674,35 @@ function openLogSheet(food,ctx,existing){
         'Wrong numbers in the database? This makes an editable copy in My Foods.'));
   }
   if(existing){
-    const swap=h('button',{class:'btn sm mt8',onclick:()=>{
+    // a past entry can be repeated today in one tap ("had the same again")
+    if(existing.date!==todayStr())body.append(h('button',{class:'btn sm mt8',onclick:guard(async()=>{
+      if(amt<=0){toast('Enter an amount');return;}
+      const m=unit==='g'&&food.p100?scaleMac(food.p100,amt/100):scaleMac(food.per,amt);
+      await logEntry({date:todayStr(),meal,foodId:food.id,amt,unit});
+      haptic();close();renderTab(S.tab);
+      toast('+'+kc(m.kcal)+' kcal · '+MEAL_NAME[meal]+' today',{pr:true});
+    })},'↻ Log again today'));
+    const swap=h('button',{class:'btn sm',onclick:()=>{
       pickFoodSheet(nf=>{
         existing.foodId=nf.id;
         if(!(nf.p100&&nf.servG)&&existing.unit==='g'){existing.unit='serv';existing.amt=1;}
-        updateEntry(existing).then(()=>{close();renderTab(S.tab);toast('Food replaced');});
+        updateEntry(existing).then(()=>{close();renderTab(S.tab);toast('Food replaced');}).catch(reportError);
       });
     }},'Replace food…');
-    const del=h('button',{class:'btn danger sm mt8',onclick:async()=>{
-      await deleteEntry(existing.id);close();renderTab(S.tab);toast('Entry deleted');
-    }},'Delete entry');
-    body.append(swap,del);
+    const del=h('button',{class:'btn danger sm',onclick:guard(async()=>{
+      const gone=await deleteEntry(existing.id);
+      close();renderTab(S.tab);
+      if(gone)undoToast('Entry deleted',()=>restoreEntry(gone));
+    })},'Delete entry');
+    body.append(h('div',{class:'grid2 mt8'},swap,del));
   }
-  logBtn.addEventListener('click',async()=>{
+  logBtn.addEventListener('click',guard(async()=>{
     if(amt<=0){toast('Enter an amount');return;}
     if(existing){
-      existing.amt=amt;existing.unit=unit;existing.meal=meal;
+      const moved=existing.date!==date;
+      existing.amt=amt;existing.unit=unit;existing.meal=meal;existing.date=date;
       await updateEntry(existing);
-      close();renderTab(S.tab);toast('Updated');
+      close();renderTab(S.tab);toast(moved?'Moved to '+(date===todayStr()?'today':fmtDay(date)):'Updated');
     }else{
       const m=unit==='g'&&food.p100?scaleMac(food.p100,amt/100):scaleMac(food.per,amt);
       await logEntry({date,meal,foodId:food.id,amt,unit});
@@ -3026,7 +3711,7 @@ function openLogSheet(food,ctx,existing){
       if(S.addCtx){S.addCtx=null;switchTab(date===todayStr()?'today':'diary');}
       else renderTab(S.tab);
     }
-  });
+  }));
   upd(false);unitNote();btnLbl();
   const close=sheet(food.name.length>28?food.name.slice(0,28)+'…':food.name,body);
 }
@@ -3168,7 +3853,7 @@ function customFoodSheet(existing,prefill,onSaved){
       sg>0?'Enter calories & macros above for a quality grade.'
       :'Add a serving weight (g) to enable the quality grade and gram logging.'));
   }
-  const save=h('button',{class:'btn primary mt12',onclick:async()=>{
+  const save=h('button',{class:'btn primary mt12 stick',onclick:async()=>{
     const name=nameI.value.trim();
     if(!name){toast('Give it a name');return;}
     f.name=name;f.brand=brandI.value.trim();
@@ -3216,7 +3901,8 @@ function customFoodSheet(existing,prefill,onSaved){
     qRow,save);
   body.addEventListener('input',updQ);
   drawAdds();updQ();
-  if(existing&&existing.src==='custom'&&!isDraft&&!hold){
+  // hidden records (quick adds, logged-once estimates) aren't in My Foods to delete from
+  if(existing&&existing.src==='custom'&&!existing.hidden&&!isDraft&&!hold){
     body.append(h('button',{class:'btn danger sm mt8',onclick:async()=>{
       if(!await ask('Delete food','Diary history that used it stays intact.','Delete',true))return;
       existing.hidden=1;await saveFood(existing);
@@ -3950,14 +4636,16 @@ function pasteEstimateSheet(){
     if(S.addCtx)S.addCtx=null;
     switchTab(ctx.date===todayStr()?'today':'diary');
   }
-  const logBtn=h('button',{class:'btn primary mt12',onclick:()=>commit('log')});
-  const onceBtn=h('button',{class:'btn chrome mt8',onclick:()=>commit('once')},
-    'Log once — keep My Foods clean');
-  const saveBtn=h('button',{class:'btn sm mt8',onclick:()=>commit('save')},'Save to My Foods only');
+  // one guard across all three: a second press of ANY of them waits its turn
+  const commitOnce=guard(commit);
+  const logBtn=hapticTap(h('button',{class:'btn primary mt12 stick',onclick:()=>commitOnce('log')}));
+  const onceBtn=hapticTap(h('button',{class:'btn chrome mt8',onclick:()=>commitOnce('once')},
+    'Log once — keep My Foods clean'));
+  const saveBtn=h('button',{class:'btn sm mt8',onclick:()=>commitOnce('save')},'Save to My Foods only');
   function lbl(){
     const n=chosen().length;
-    logBtn.textContent='Log '+(n===1?'it':n+' items')+' to '+MEAL_NAME[meal]+
-      (ctx.date!==todayStr()?' · '+fmtDay(ctx.date):'');
+    btnText(logBtn,'Log '+(n===1?'it':n+' items')+' to '+MEAL_NAME[meal]+
+      (ctx.date!==todayStr()?' · '+fmtDay(ctx.date):''));
   }
   foot.append(labeled('Log to',seg(MEALS,meal,v=>{meal=v;lbl();})),logBtn,onceBtn,saveBtn,
     h('p',{class:'tiny dim',style:'margin-top:10px;line-height:1.5'},
@@ -3974,13 +4662,72 @@ function pasteEstimateSheet(){
   const close=sheet('Paste an estimate',body);
 }
 
+/* ---------- quick add (v4.0) ----------
+   "About 450 kcal from the café" without inventing a food first. Stored the
+   way the rest of the app already understands: a HIDDEN custom food
+   (origin 'quick') that the entry references. Totals, edits, copies, the
+   CSV, backups — and older MacroLog builds reading the same database — all
+   treat it as an ordinary entry, and it never clutters My Foods or search. */
+function quickAddSheet(ctx){
+  ctx=ctx||S.addCtx||{date:todayStr(),meal:mealGuess()};
+  let meal=ctx.meal||mealGuess();
+  const date=ctx.date||todayStr();
+  const go=e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();logBtn.click();}};
+  const num=(label)=>h('input',{class:'in num',inputmode:'decimal',placeholder:'0',autocomplete:'off',
+    enterkeyhint:'done','aria-label':label,onkeydown:go});
+  const kI=h('input',{class:'in num qa-kcal',inputmode:'decimal',placeholder:'0',autocomplete:'off',
+    enterkeyhint:'done','aria-label':'Calories',onkeydown:go});
+  const pI=num('Protein grams'),cI=num('Carb grams'),fI=num('Fat grams');
+  const nameI=h('input',{class:'in',placeholder:'Optional — e.g. café muffin',autocomplete:'off',
+    maxlength:'60',enterkeyhint:'done',onkeydown:go});
+  const hint=h('div',{class:'qa-hint num'});
+  const vals=()=>({k:numOr(kI.value,0),p:numOr(pI.value,0),c:numOr(cI.value,0),f:numOr(fI.value,0)});
+  const macroK=v=>v.p*4+v.c*4+v.f*9;
+  const logBtn=hapticTap(h('button',{class:'btn primary mt12 stick'}));
+  function upd(){
+    const v=vals(),mm=macroK(v);
+    hint.textContent=!(v.k>0)&&mm>0?'Calories from the macros: '+kc(mm)+' kcal'
+      :v.k>0&&mm>0&&Math.abs(mm-v.k)/v.k>.25?'Heads up — those macros add up to '+kc(mm)+' kcal':'';
+    const k=v.k>0?v.k:mm;
+    btnText(logBtn,'Log '+(k>0?kc(k)+' kcal ':'')+'to '+MEAL_NAME[meal]+(date!==todayStr()?' · '+fmtDay(date):''));
+  }
+  logBtn.addEventListener('click',guard(async()=>{
+    const v=vals();
+    const kcal=v.k>0?v.k:macroK(v);
+    if(!(kcal>0)){toast('Enter calories — or some macros');return;}
+    if(kcal>15000||v.p>1500||v.c>2500||v.f>1500){toast('That looks too big for one entry — check the numbers');return;}
+    const f={...FOOD_DEF,id:'c'+uid(),src:'custom',name:nameI.value.trim()||'Quick add',brand:'',
+      per:{...ZERO,kcal,p:Math.max(v.p,0),c:Math.max(v.c,0),f:Math.max(v.f,0)},
+      servLabel:'1 entry',servG:null,p100:null,ts:Date.now(),hidden:1,origin:'quick'};
+    await saveFood(f);
+    await logEntry({date,meal,foodId:f.id,amt:1,unit:'serv'});
+    haptic();close();
+    toast('+'+kc(kcal)+' kcal · '+MEAL_NAME[meal],{pr:true});
+    if(S.addCtx&&ctx===S.addCtx){S.addCtx=null;switchTab(date===todayStr()?'today':'diary');}
+    else renderTab(S.tab);
+  }));
+  const body=h('div',{},
+    h('p',{class:'small dim',style:'margin:0 2px 10px;line-height:1.5'},
+      'Log calories straight in — macros optional. Nothing is added to My Foods.'),
+    labeled('Calories (kcal)',kI),hint,
+    h('div',{class:'grid3'},labeled('Protein (g)',pI),labeled('Carbs (g)',cI),labeled('Fat (g)',fI)),
+    labeled('Label',nameI),
+    labeled('Meal',seg(MEALS,meal,v=>{meal=v;upd();})),
+    logBtn);
+  body.addEventListener('input',upd);
+  upd();
+  const close=sheet('Quick add'+(date!==todayStr()?' · '+fmtDay(date):''),body);
+  // focused inside the tap that opened the sheet, so phones raise the keyboard
+  try{kI.focus({preventScroll:true});}catch(e){}
+}
+
 /* ---------- food picker (recipes & replace-food) ---------- */
 function pickFoodSheet(cb){
   const list=h('div',{class:'listcard mt8'});
   function fill(q){
     list.innerHTML='';
-    const ql=(q||'').toLowerCase();
-    let items=[...S.foods.values()].filter(f=>!f.hidden&&(!ql||f.name.toLowerCase().includes(ql)||(f.brand||'').toLowerCase().includes(ql)));
+    const hit=localMatcher(q||'');
+    let items=[...S.foods.values()].filter(f=>!f.hidden&&hit(f));
     items.sort((a,b)=>(b.lastUsed||0)-(a.lastUsed||0)||(b.used||0)-(a.used||0));
     for(const f of items.slice(0,25))list.append(foodRowBtn(f,null,()=>{close();cb(f);}));
     if(!items.length)list.append(h('div',{class:'mealempty'},h('i',{},'No matches in your library')));
@@ -4040,7 +4787,7 @@ function recipeSheet(existing){
   const addB=h('button',{class:'btn sm mt8',onclick:()=>pickFoodSheet(f=>{
     items.push({foodId:f.id,amt:1,unit:'serv'});redraw();
   })},'+ Add food');
-  const save=h('button',{class:'btn primary mt12',onclick:async()=>{
+  const save=h('button',{class:'btn primary mt12 stick',onclick:async()=>{
     const name=nameI.value.trim();
     if(!name){toast('Name your meal');return;}
     if(!items.length){toast('Add some foods first');return;}
@@ -4173,7 +4920,7 @@ function importRecipeSheet(){
   let meal=ctx.meal;
   const mealRow=h('div',{style:'display:none'},
     labeled('Log to',seg(MEALS,meal,v=>meal=v)));
-  const onceBtn=h('button',{class:'btn chrome mt12',style:'display:none',onclick:async()=>{
+  const onceBtn=h('button',{class:'btn chrome mt12',style:'display:none',onclick:guard(async()=>{
     const items=buildItems();
     if(!items.length){toast('No matched ingredients yet');return;}
     for(const it of items)await logEntry({date:ctx.date,meal,foodId:it.foodId,amt:it.amt,unit:it.unit});
@@ -4182,7 +4929,7 @@ function importRecipeSheet(){
     toast('+'+kc(t.kcal)+' kcal · '+items.length+' items (not saved as a meal)',{pr:true});
     if(S.addCtx){S.addCtx=null;switchTab(ctx.date===todayStr()?'today':'diary');}
     else renderTab(S.tab);
-  }},'Log once — don’t save as meal');
+  })},'Log once — don’t save as meal');
   const goBtn=h('button',{class:'btn primary mt8',style:'display:none',onclick:()=>{
     const items=buildItems();
     if(!items.length){toast('No matched ingredients yet');return;}
@@ -4209,9 +4956,9 @@ function logMealSheet(m){
     list.append(h('div',{class:'food-row'},mid,
       h('div',{class:'fr-kcal num'},h('b',{},kc(mm.kcal)),h('span',{},'kcal'))));
   }
-  const logB=h('button',{class:'btn primary mt12'});
-  const lbl=()=>{logB.textContent='Log all to '+MEAL_NAME[meal]+(ctx.date!==todayStr()?' · '+fmtDay(ctx.date):'');};
-  logB.addEventListener('click',async()=>{
+  const logB=hapticTap(h('button',{class:'btn primary mt12 stick'}));
+  const lbl=()=>{btnText(logB,'Log all to '+MEAL_NAME[meal]+(ctx.date!==todayStr()?' · '+fmtDay(ctx.date):''));};
+  logB.addEventListener('click',guard(async()=>{
     for(const it of m.items)await logEntry({date:ctx.date,meal,foodId:it.foodId,amt:it.amt,unit:it.unit});
     m.used=(m.used||0)+1;m.lastUsed=Date.now();
     await dbPut('meals',m);
@@ -4219,7 +4966,7 @@ function logMealSheet(m){
     toast('+'+kc(t.kcal)+' kcal · '+m.items.length+' items',{pr:true});
     if(S.addCtx){S.addCtx=null;switchTab(ctx.date===todayStr()?'today':'diary');}
     else renderTab(S.tab);
-  });
+  }));
   const body=h('div',{},
     h('p',{class:'small dim num',style:'margin:0 2px'},kc(t.kcal)+' kcal · P'+g1(t.p)+' C'+g1(t.c)+' F'+g1(t.f)),
     list,labeled('Meal',seg(MEALS,meal,v=>{meal=v;lbl();})),logB,
@@ -4251,7 +4998,8 @@ function validEAN(code){
 }
 function loadScript(src){
   return new Promise((res,rej)=>{
-    const s=h('script',{src,onload:res,onerror:rej});
+    // CORS so the service worker can cache it for offline scanning (sw.js)
+    const s=h('script',{src,crossorigin:'anonymous',onload:res,onerror:rej});
     document.head.append(s);
   });
 }
@@ -4261,7 +5009,15 @@ async function openScanner(){
     return;
   }
   SCAN.on=true;SCAN.done=false;SCAN.last='';SCAN.lastN=0;
+  /* v4.0: every await below can outlive the scanner — Cancel or Back pressed
+     while the camera permission prompt is up used to let the stream start
+     anyway, in a hidden overlay, with the camera light on. Each step now
+     checks it still belongs to the scanner that is open. */
+  const sid=SCAN.sid=(SCAN.sid||0)+1;
+  const stale=()=>SCAN.sid!==sid||!SCAN.on;
+  const drop=st=>{if(st)for(const t of st.getTracks())t.stop();};
   $('#scanov').classList.add('open');
+  layerOpen(closeScanner);
   $('#scan-torch').style.display='none';
   const manual=$('#scan-manual');
   manual.style.display='none';
@@ -4273,24 +5029,34 @@ async function openScanner(){
   const want={facingMode:{ideal:'environment'},
     width:{ideal:1920},height:{ideal:1080},
     focusMode:{ideal:'continuous'},advanced:[{focusMode:'continuous'}]};
+  let stream=null;
   try{
-    SCAN.stream=await navigator.mediaDevices.getUserMedia({video:want,audio:false});
+    stream=await navigator.mediaDevices.getUserMedia({video:want,audio:false});
   }catch(e){
     try{  // some devices reject the ideal constraints outright
-      SCAN.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
+      stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
     }catch(e2){
+      if(stale())return;
       closeScanner();
       manualBarcodeSheet('Camera unavailable ('+e2.name+') — type the barcode digits instead:');
       return;
     }
   }
+  if(stale()){drop(stream);return;}
+  SCAN.stream=stream;
   const vid=$('#scanvid');
   vid.srcObject=SCAN.stream;
   vid.setAttribute('autoplay','');
   await vid.play().catch(()=>{});
+  if(stale())return;   // closeScanner has already released the stream
   // torch: Android/Chrome exposes it as a track capability; iOS does not,
   // so the button only appears where it actually works
   SCAN.track=SCAN.stream.getVideoTracks()[0]||null;
+  // the system can end the camera under us (a call, Control Centre, iOS
+  // revoking it): close cleanly instead of leaving a frozen frame on screen
+  if(SCAN.track)SCAN.track.addEventListener('ended',()=>{
+    if(SCAN.on&&SCAN.sid===sid){closeScanner();toast('Camera stopped — tap scan to try again');}
+  });
   SCAN.torch=false;
   try{
     const caps=SCAN.track&&SCAN.track.getCapabilities?SCAN.track.getCapabilities():{};
@@ -4299,6 +5065,7 @@ async function openScanner(){
   if(window.BarcodeDetector){
     try{
       const fmts=await BarcodeDetector.getSupportedFormats();
+      if(stale())return;
       if(fmts.includes('ean_13')){
         // widen the format list: UK/EU shelf labels and some own-brand packs
         // carry ITF-14 or Code-39 rather than EAN-13
@@ -4310,11 +5077,15 @@ async function openScanner(){
   }
   try{
     if(!window.ZXingBrowser)await loadScript('https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js');
+    if(stale())return;
     const reader=new ZXingBrowser.BrowserMultiFormatReader();
-    SCAN.zx=await reader.decodeFromStream(SCAN.stream,vid,res=>{
+    const zx=await reader.decodeFromStream(SCAN.stream,vid,res=>{
       if(res&&SCAN.on)handleCode(res.getText());
     });
+    if(stale()){try{zx.stop();}catch(e){}return;}
+    SCAN.zx=zx;
   }catch(e){
+    if(stale())return;
     closeScanner();
     manualBarcodeSheet('Scanner library couldn’t load'+(S.offline?' (offline)':'')+' — type the digits instead:');
   }
@@ -4353,6 +5124,7 @@ function closeScanner(){
   const vid=$('#scanvid');
   if(vid)vid.srcObject=null;
   $('#scanov').classList.remove('open');
+  layerClosed(closeScanner);
 }
 /* Accept on a valid checksum immediately; otherwise require the same code
    twice in a row. Blurred/partial decodes rarely repeat identically, so
@@ -4432,11 +5204,14 @@ function renderDiary(){
     tile(t.f,tg.f,'fat','g',macroMet('f',t,tg))));
   // day note (premium-parity: day & meal notes)
   const dn=(S.notes[ds]||{}).day;
-  pg.append(h('button',{class:dn?'note-line daynote':'btn sm mb8',
-    onclick:()=>noteSheet(ds,'day')},dn?'✎ '+dn:'✎ Add a note to this day'));
-  pg.append(h('div',{class:'grid2 mb8'},
-    h('button',{class:'btn sm',onclick:()=>daySummarySheet(ds)},'📊 Full breakdown'),
-    h('button',{class:'btn sm',onclick:()=>copyDaySheet(ds)},'⧉ Copy a day here')));
+  if(dn)pg.append(h('button',{class:'note-line daynote',onclick:()=>noteSheet(ds,'day')},'✎ '+dn));
+  /* v4.0: one scrollable row of compact actions instead of three
+     full-width buttons stacked above the first meal */
+  pg.append(h('div',{class:'actrow'},
+    h('button',{class:'pill hl',onclick:()=>quickAddSheet({date:ds,meal:mealGuess()})},'⚡ Quick add'),
+    h('button',{class:'pill',onclick:()=>daySummarySheet(ds)},'📊 Breakdown'),
+    h('button',{class:'pill',onclick:()=>copyDaySheet(ds)},'⧉ Copy a day'),
+    dn?null:h('button',{class:'pill',onclick:()=>noteSheet(ds,'day')},'✎ Day note')));
   pg.append(mealGroupsEl(ds));
 }
 /* one note per day + per meal slot, stored in kv 'notes':
@@ -4447,7 +5222,7 @@ function noteSheet(ds,slot){
   const ta=h('textarea',{class:'in',rows:4,placeholder:slot==='day'
     ?'How did the day go? Hunger, energy, context…'
     :'e.g. ate out, estimated portions'},cur);
-  const save=h('button',{class:'btn primary mt12',onclick:async()=>{
+  const save=h('button',{class:'btn primary mt12 stick',onclick:async()=>{
     const v=ta.value.trim();
     if(!S.notes[ds])S.notes[ds]={};
     if(v)S.notes[ds][slot]=v;
@@ -4504,17 +5279,19 @@ function renderProgress(){
   pg.append(h('div',{class:'rangebar'},
     seg([[7,'7 days'],[30,'30 days'],[90,'90 days']],PRANGE,v=>{PRANGE=v;renderProgress();})));
   // headline stats
-  const st=streaks(),wk=weekAvg(),tg=S.set.t;
-  let logged7=0;
-  for(let i=0;i<7;i++)if(entriesFor(addDays(todayStr(),-i)).length)logged7++;
-  const wkTxt=wk?kc(wk.avg)+'':'—';
-  const wkPct=wk&&tg.kcal?Math.round((wk.avg-tg.kcal)/tg.kcal*100):null;
+  const st=streaks(),wk=weekAvg();
+  let logged7=0,stars7=0;
+  for(const d of lastNDays(7)){if(entriesFor(d).length)logged7++;if(starDay(d))stars7++;}
+  const wkPct=wk&&wk.tavg?Math.round((wk.avg-wk.tavg)/wk.tavg*100):null;
   const stats=h('div',{class:'statgrid'},
     h('div',{class:'pstat'},h('b',{class:'num streakfire'},'🔥 '+st.cur+h2s(' day',st.cur)),h('span',{},'streak · best '+st.best)),
-    h('div',{class:'pstat'},h('b',{class:'num'},wkTxt,h('small',{},' kcal')),h('span',{},'7-day avg'+(wkPct==null?'':' · '+(wkPct>=0?'+':'')+wkPct+'% vs target'))),
-    h('div',{class:'pstat'},h('b',{class:'num'},logged7+'/7'),h('span',{},'days logged this week')),
-    h('div',{class:'pstat'},h('b',{class:'num'},kc(tg.kcal),h('small',{},' kcal')),h('span',{},'daily target')));
-  pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'This week'),stats));
+    h('div',{class:'pstat'},h('b',{class:'num'},wk?kc(wk.avg):'—',h('small',{},' kcal'),
+      wkPct==null?null:h('small',{class:'delta'+(Math.abs(wkPct)<=10?' ok':'')},' '+(wkPct>0?'+':'')+wkPct+'%')),
+      h('span',{},'avg · last 7 days')),
+    h('div',{class:'pstat'},h('b',{class:'num'},logged7+'/7'),h('span',{},'days logged')),
+    h('div',{class:'pstat'},h('b',{class:'num'},'⭐ '+stars7),h('span',{},'star '+h2s('day',stars7))));
+  pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'This week'),stats,
+    h('p',{class:'tiny dim',style:'margin:8px 2px 0'},'Averages use complete days only — today joins them tomorrow.')));
   if(!window.Chart){
     pg.append(h('div',{class:'empty'},
       h('div',{class:'serif'},'Charts unavailable'),
@@ -4536,6 +5313,20 @@ function renderProgress(){
        borderDash:[5,5],pointRadius:0,fill:false},
       ...glowPair(kcals,acc,g)]},
     options:baseOpts()});
+  /* range summary — the chart's shape in three numbers. Average over
+     complete logged days (today is partial); % against each day's target */
+  const today=todayStr();
+  const doneDays=days.filter(d=>d<today&&entriesFor(d).length);
+  const loggedN=days.filter(d=>entriesFor(d).length).length;
+  const starN=days.filter(starDay).length;
+  if(loggedN){
+    const avg=doneDays.length?doneDays.reduce((a,d)=>a+dayTotals(d).kcal,0)/doneDays.length:null;
+    const tav=doneDays.length?doneDays.reduce((a,d)=>a+targetFor(d).kcal,0)/doneDays.length:0;
+    c1.card.append(h('div',{class:'rangesum num'},
+      avg!=null?h('span',{},'avg ',h('b',{},kc(avg)),' kcal'+(tav?' · '+Math.round(avg/tav*100)+'% of target':'')):null,
+      h('span',{},h('b',{},String(loggedN)),' of '+PRANGE+' days logged'),
+      starN?h('span',{},'⭐ ',h('b',{},String(starN))):null));
+  }
   // macro trend (grams)
   const c2=chartCard('Macros (g)');
   pg.append(c2.card);
@@ -4590,15 +5381,36 @@ function renderProgress(){
   const useRange=inRange.length>=2;
   const wLabels=useRange?labels:latest.slice(-12).map(b=>fmtDayShortP(b.date));
   const wdata=useRange?days.map(d=>wmap.get(d)??null):latest.slice(-12).map(b=>b.kg);
+  /* v4.0: a 7-day trailing average drawn over the weigh-ins. Single
+     readings swing a kilo or more with water and salt; the trend is the
+     line worth reading, and the change figure below is taken from it. */
+  const trendAt=ds=>{
+    const lo=addDays(ds,-6);let s=0,n=0;
+    for(const b of latest)if(b.date>=lo&&b.date<=ds&&b.kg>0){s+=b.kg;n++;}
+    return n?Math.round(s/n*10)/10:null;
+  };
   if(latest.length){
+    const trend=useRange?days.map(trendAt):latest.slice(-12).map(b=>trendAt(b.date));
     CH.wt=new Chart(c4.cv,{type:'line',
-      data:{labels:wLabels,datasets:glowPair(wdata,mp).map(d=>({...d,pointRadius:d.borderWidth<5?2.5:0,pointBackgroundColor:mp}))},
+      data:{labels:wLabels,datasets:[
+        {data:wdata,borderColor:mp+'55',borderWidth:1.5,pointRadius:2.6,pointBorderWidth:0,
+         pointBackgroundColor:mp,tension:.25,spanGaps:true,fill:false},
+        ...glowPair(trend,mp)]},
       options:baseOpts()});
     const last=latest[latest.length-1];
     const foot=h('p',{class:'small dim num',style:'text-align:center;margin-top:6px'},
       'Latest: '+last.kg+' kg ('+fmtDay(last.date)+')',
       h('button',{class:'linkbtn',style:'margin-left:4px',onclick:weightHistorySheet},'History'));
     c4.card.append(foot);
+    if(inRange.length>=2){
+      const t0=trendAt(inRange[0].date),t1=trendAt(inRange[inRange.length-1].date);
+      if(t0!=null&&t1!=null){
+        const dlt=Math.round((t1-t0)*10)/10;
+        c4.card.append(h('div',{class:'rangesum num'},
+          h('span',{},'trend ',h('b',{},t1+' kg')),
+          h('span',{},h('b',{},(dlt>0?'+':dlt<0?'−':'±')+Math.abs(dlt)+' kg'),' over '+PRANGE+' days')));
+      }
+    }
     if(!useRange)c4.card.append(h('p',{class:'tiny dim',style:'text-align:center;margin-top:2px'},
       inRange.length?'Showing your last '+Math.min(latest.length,12)+' weigh-ins — only one falls in this range.'
         :'Showing your last '+Math.min(latest.length,12)+' weigh-ins — none fall in this range.'));
@@ -4669,12 +5481,22 @@ function weightHistorySheet(){
     const mid=h('div',{class:'grow'},
       h('div',{class:'fr-name num'},b.kg+' kg'),
       h('div',{class:'fr-sub'},fmtDay(b.date)+(b.note?' · '+b.note:'')));
+    // v4.0: deleting keeps the list open (several can go in a row) and is undoable
     const del=h('button',{class:'xbtn','aria-label':'Delete weigh-in',onclick:async()=>{
       S.body=S.body.filter(x=>x.id!==b.id);
-      await dbDel('body',b.id);
-      close();renderProgress();
+      try{await dbDel('body',b.id);}catch(e){S.body.push(b);throw e;}
+      row.remove();
+      if(!list.querySelector('.food-row'))list.append(h('div',{class:'mealempty'},h('i',{},'No weigh-ins yet')));
+      if(S.tab==='progress')renderProgress();
+      undoToast('Weigh-in deleted',async()=>{
+        if(S.body.some(x=>x.id===b.id))return;
+        S.body.push(b);
+        try{await dbPut('body',b);}catch(e){S.body=S.body.filter(x=>x!==b);throw e;}
+        close();
+      });
     }},'✕');
-    list.append(h('div',{class:'food-row'},mid,del));
+    const row=h('div',{class:'food-row'},mid,del);
+    list.append(row);
   }
   if(!rows.length)list.append(h('div',{class:'mealempty'},h('i',{},'No weigh-ins yet')));
   const close=sheet('Weight history',list);
@@ -4701,12 +5523,24 @@ function buildNav(){
       onclick:()=>switchTab(id)}));
   }
 }
+let ENTER_T=0;
 function switchTab(t){
   closeOpenRow();
+  /* leaving Progress: its Chart.js instances (and their resize observers)
+     used to live on behind the hidden page until the next visit */
+  if(S.tab==='progress'&&t!=='progress')destroyCharts();
   S.tab=t;
-  $$('.page').forEach(p=>p.classList.remove('active'));
-  $('#pg-'+t).classList.add('active');
-  $$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+  $$('.page').forEach(p=>p.classList.remove('active','enter'));
+  const pg=$('#pg-'+t);
+  pg.classList.add('active','enter');
+  // the cascade plays once per visit; later re-renders (after a save) don't
+  clearTimeout(ENTER_T);
+  ENTER_T=setTimeout(()=>pg.classList.remove('enter'),650);
+  $$('#nav button').forEach(b=>{
+    const on=b.dataset.tab===t;
+    b.classList.toggle('on',on);
+    if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
+  });
   renderTab(t);
   $('#main').scrollTop=0;
   if(t==='today')setHeader(greetTitle(),fmtDayLong(todayStr()));
@@ -4833,10 +5667,10 @@ function trainingSheet(){
   const holder=h('div',{});
   const dayRow=h('div',{class:'chips mt8'});
   WD.forEach((w,i)=>{
-    const b=h('button',{class:'chip',style:days.has(i)?'background:var(--acc);color:#fff;border-color:var(--acc)':'',
+    const b=h('button',{class:'chip',style:days.has(i)?'background:var(--acc-fill);color:var(--on-acc);border-color:var(--acc-fill)':'',
       onclick:()=>{
         if(days.has(i))days.delete(i);else days.add(i);
-        b.style.cssText=days.has(i)?'background:var(--acc);color:#fff;border-color:var(--acc)':'';
+        b.style.cssText=days.has(i)?'background:var(--acc-fill);color:var(--on-acc);border-color:var(--acc-fill)':'';
       }},w);
     dayRow.append(b);
   });
@@ -4895,7 +5729,7 @@ function autoLogSheet(){
     const body2=h('div',{},
       labeled('Servings',amtI),
       labeled('Meal',seg(MEALS,meal,v=>meal=v)),
-      h('button',{class:'btn primary mt12',onclick:async()=>{
+      h('button',{class:'btn primary mt12',onclick:guard(async()=>{
         S.set.autoLog=S.set.autoLog||[];
         S.set.autoLog.push({foodId:f.id,amt:amt||1,unit:'serv',meal});
         // if today's auto-run already happened, log the new rule now too
@@ -4904,7 +5738,7 @@ function autoLogSheet(){
         await saveSet();
         close2();redraw();
         toast('Will auto-log daily');
-      }},'Add daily item'));
+      })},'Add daily item'));
     const close2=sheet(f.name,body2);
   })},'+ Add daily food');
   const body=h('div',{},
@@ -4955,43 +5789,60 @@ function mealSlotsSheet(){
   redraw();
 }
 
-/* ---------------- Settings tab ---------------- */
+/* ---------------- Settings tab ----------------
+   v4.0: grouped rows (icon · label · current value · chevron) instead of a
+   stack of identical full-width buttons, so each setting shows its state
+   without being opened, and the destructive action sits apart from the rest. */
+function navRow(icon,label,value,onclick,extra){
+  return h('button',{class:'navrow'+(extra||''),onclick},
+    h('span',{class:'ni','aria-hidden':'true'},icon),
+    h('span',{class:'nl'},label),
+    value!=null&&value!==''?h('span',{class:'nv'},value):null,
+    h('span',{class:'nc','aria-hidden':'true'},'›'));
+}
+const WD_SHORT=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function renderSettings(){
   const pg=$('#pg-settings');pg.innerHTML='';
   const t=S.set.t;
   const nameI=h('input',{class:'in',value:S.set.name,placeholder:'What should we call you?',
-    onchange:e=>{S.set.name=e.target.value.trim();saveSet();}});
+    autocomplete:'given-name',onchange:e=>{S.set.name=e.target.value.trim();saveSet();}});
+  const t2d=[...(S.set.t2days||[])].sort((a,b)=>((a+6)%7)-((b+6)%7));   // Mon-first
+  const tiles=h('button',{class:'daysum tilesbtn','aria-label':'Edit daily targets',onclick:targetsSheet},
+    h('span',{class:'ds num'},h('b',{},kc(t.kcal)),h('span',{},'kcal')),
+    h('span',{class:'ds num'},h('b',{},g1(t.p)),h('span',{},'protein')),
+    h('span',{class:'ds num'},h('b',{},g1(t.c)),h('span',{},carbLbl().toLowerCase())),
+    h('span',{class:'ds num'},h('b',{},g1(t.f)),h('span',{},'fat')));
   pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'Profile'),
     labeled('Name',nameI),
-    h('label',{class:'lbl'},'Daily targets'),
-    h('div',{class:'daysum',style:'margin-bottom:8px'},
-      h('div',{class:'ds num'},h('b',{},kc(t.kcal)),h('span',{},'kcal')),
-      h('div',{class:'ds num'},h('b',{},g1(t.p)),h('span',{},'protein')),
-      h('div',{class:'ds num'},h('b',{},g1(t.c)),h('span',{},'carbs')),
-      h('div',{class:'ds num'},h('b',{},g1(t.f)),h('span',{},'fat'))),
-    h('button',{class:'btn sm',onclick:targetsSheet},'Edit targets'),
-    h('button',{class:'btn sm mt8',onclick:trainingSheet},
-      S.set.t2?'Training-day targets · '+(S.set.t2days||[]).length+' day/wk':'Training-day targets…')));
+    h('label',{class:'lbl'},'Daily targets'),tiles,
+    h('div',{class:'navlist'},
+      navRow('🎯','Edit daily targets',null,targetsSheet),
+      navRow('🏋️','Training-day targets',
+        S.set.t2&&t2d.length?(t2d.length>3?t2d.length+' days/wk':t2d.map(d=>WD_SHORT[d]).join(' · ')):'Off',
+        trainingSheet))));
   // tracking preferences
+  const nMicro=Object.keys(S.set.microT||{}).length;
+  const nAuto=(S.set.autoLog||[]).length;
   pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'Tracking'),
     labeled('Carbohydrates',seg([[0,'Total carbs'],[1,'Net carbs (− fibre)']],S.set.netCarbs?1:0,async v=>{
       S.set.netCarbs=v;await saveSet();})),
-    h('button',{class:'btn sm mt12',onclick:autoLogSheet},
-      '⟳ Auto-log daily foods'+((S.set.autoLog||[]).length?' · '+S.set.autoLog.length:'…')),
-    h('button',{class:'btn sm mt8',onclick:microTargetsSheet},'Micronutrient targets…'),
-    h('button',{class:'btn sm mt8',onclick:mealSlotsSheet},'Meal slots & names…'),
-    h('button',{class:'btn sm mt8',onclick:estFormatSheet},'📋 Paste-estimate format…')));
+    h('div',{class:'navlist mt8'},
+      navRow('⟳','Auto-log daily foods',nAuto?nAuto+' item'+(nAuto===1?'':'s'):'None',autoLogSheet),
+      navRow('🧪','Micronutrient targets',nMicro?nMicro+' custom':'Age & sex defaults',microTargetsSheet),
+      navRow('🍽️','Meal slots & names',MEALS.length+' slots',mealSlotsSheet),
+      navRow('📋','Paste-estimate format',null,estFormatSheet))));
   // appearance
   const sw=h('div',{class:'swatches mt8'});
   for(const[key,cols]of Object.entries(ACCENTS)){
     sw.append(h('button',{class:'swatch'+(S.set.accent===key?' on':''),
       style:'background:linear-gradient(135deg,'+cols[0]+','+cols[1]+')',
-      'aria-label':key,
+      'aria-label':key+' accent','aria-pressed':S.set.accent===key?'true':'false',
       onclick:async()=>{S.set.accent=key;await saveSet();applyTheme();renderSettings();}}));
   }
   pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'Appearance'),
-    labeled('Theme',seg([['dark','Dark'],['light','Light']],S.set.theme,async v=>{
+    labeled('Theme',seg([['auto','Auto'],['dark','Dark'],['light','Light']],S.set.theme,async v=>{
       S.set.theme=v;await saveSet();applyTheme();})),
+    h('p',{class:'tiny dim',style:'margin:6px 2px 0'},'Auto follows your phone’s light/dark setting.'),
     h('label',{class:'lbl'},'Accent colour'),sw));
   /* data safety (v3.3) — a browser may evict a "best-effort" origin whole and
      silently, which is what wiped the Android install roughly weekly.
@@ -5000,7 +5851,7 @@ function renderSettings(){
      host, a rotating tunnel — presents to the user EXACTLY like a wipe, so it is
      worth being able to read it off the screen) and how old the last backup is. */
   const dsPill=h('span',{class:'ds-pill'},'Checking…');
-  const dsNote=h('p',{class:'tiny dim',style:'margin:7px 2px 0'});
+  const dsNote=h('p',{class:'tiny dim',style:'margin:7px 2px 0;line-height:1.5'});
   const dsBk=h('p',{class:'small',style:'margin:10px 2px 0'});
   const refreshSafety=async()=>{
     const st=await storageReport();
@@ -5028,25 +5879,30 @@ function renderSettings(){
     h('div',{class:'setrow'},h('h3',{class:'serif grow',style:'margin:0'},'Data safety'),dsPill),
     dsNote,dsBk,
     h('p',{class:'tiny dim',style:'margin:9px 2px 12px'},
-      S.entries.length+' diary entries · '+S.foods.size+' foods · '+S.meals.length+' meals · '+S.body.length+' weigh-ins — all stored on this device. MacroLog v'+APP_VER+' · '+location.origin),
+      S.entries.length+' diary entries · '+S.byDate.size+' days · '+S.foods.size+' foods · '+S.meals.length+' meals · '+S.body.length+' weigh-ins — all stored on this device.'),
     h('button',{class:'btn sm primary',onclick:downloadExport},'Export backup (JSON)'),
-    /* Android: a plain download lands in Downloads, where a “free up space” sweep
-       can take it along with everything else. The share sheet puts the file
-       somewhere off the device instead. Null when unsupported — h() drops it. */
-    canShareBackup()?h('button',{class:'btn sm mt8',onclick:shareBackup},'Send a backup somewhere safe…'):null,
-    h('button',{class:'btn sm mt8',onclick:downloadCSV},'Download food log (CSV)'),
-    h('button',{class:'btn sm mt8',onclick:importSheet},'Import backup…'),
-    h('button',{class:'btn danger sm mt8',onclick:wipeAll},'Erase everything'),
-    labeled('USDA API key (optional)',h('input',{class:'in',value:S.set.fdcKey||'',
-      placeholder:'blank = shared DEMO_KEY (rate-limited)',autocomplete:'off',
-      onchange:e=>{S.set.fdcKey=e.target.value.trim();saveSet();toast('USDA key saved');}})),
-    h('p',{class:'tiny dim',style:'margin-top:6px'},
-      'Searches query Open Food Facts and USDA FoodData Central together — USDA covers whole, generic and homemade foods. The shared DEMO_KEY allows ~30 searches/hour; a free personal key from fdc.nal.usda.gov/api-key-signup lifts that to 1,000.')));
+    h('div',{class:'navlist mt8'},
+      /* Android: a plain download lands in Downloads, where a “free up space”
+         sweep can take it along with everything else. The share sheet puts the
+         file somewhere off the device instead. Null when unsupported. */
+      canShareBackup()?navRow('📤','Send a backup somewhere safe',null,shareBackup):null,
+      navRow('⬇️','Download food log (CSV)',null,downloadCSV),
+      navRow('♻️','Restore from a backup',null,importSheet)),
+    h('button',{class:'btn danger sm mt12',onclick:wipeAll},'Erase everything')));
   refreshSafety();
+  // food databases
+  pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'Food databases'),
+    h('p',{class:'small dim',style:'margin:0 2px 2px;line-height:1.5'},
+      'Searches query Open Food Facts and USDA FoodData Central together — USDA covers whole, generic and homemade foods.'),
+    labeled('USDA API key (optional)',h('input',{class:'in',value:S.set.fdcKey||'',
+      placeholder:'Blank = shared DEMO_KEY',autocomplete:'off',spellcheck:'false',
+      onchange:e=>{S.set.fdcKey=e.target.value.trim();saveSet();toast('USDA key saved');}})),
+    h('p',{class:'tiny dim',style:'margin-top:6px;line-height:1.5'},
+      'The shared DEMO_KEY allows ~30 searches an hour; a free personal key from fdc.nal.usda.gov/api-key-signup lifts that to 1,000.')));
   // about
   pg.append(h('div',{class:'card'},h('h3',{class:'serif'},'About'),
     h('div',{class:'setrow'},h('span',{class:'grow dim small'},'Version'),h('b',{class:'num'},APP_VER)),
-    h('div',{class:'setrow'},h('span',{class:'grow dim small'},'Food databases'),h('span',{class:'small'},'Open Food Facts + USDA FDC')),
+    h('div',{class:'setrow'},h('span',{class:'grow dim small'},'Address'),h('span',{class:'small',style:'word-break:break-all;text-align:right'},location.origin)),
     h('p',{class:'tiny dim',style:'margin-top:10px;line-height:1.5'},
       'Install: share button → “Add to Home Screen”. Everything lives on this device in IndexedDB — export a backup before switching phones. Scanned products are cached for offline reuse.')));
 }
@@ -5114,48 +5970,87 @@ async function shareBackup(){
 const FOOD_DEF={src:'custom',barcode:null,brand:'',per:null,servLabel:'1 serving',
   servG:null,p100:null,thumb:null,ns:null,nova:null,adds:null,ts:0,used:0,lastUsed:0,hidden:0,edited:0,
   origin:null,estConf:null,estNote:null};
+const isBackup=data=>!!(data&&data.app==='macrolog'&&Array.isArray(data.entries));
 async function applyImport(data){
-  if(!data||data.app!=='macrolog'||!Array.isArray(data.entries))
-    throw new Error('Not a MacroLog backup file');
-  await Promise.all([dbClear('foods'),dbClear('entries'),dbClear('meals'),dbClear('body')]);
+  if(!isBackup(data))throw new Error('Not a MacroLog backup file');
   /* Per-record tolerance: one malformed row (hand-edited backup, a record
-     missing its id) used to throw mid-restore and leave the device with a
-     half-imported database. Bad rows are now skipped and counted, so the
-     rest of the backup always lands. */
+     missing its id) is skipped and counted, so the rest of the backup lands.
+     v4.0: every record is built and checked in memory FIRST, then the whole
+     restore — clear + write, all four stores plus settings and notes — runs in
+     ONE transaction. Before, the stores were cleared up front and refilled
+     request by request, so a failure part-way (storage full, the app killed
+     mid-restore) left the device with neither the old data nor the new. Now
+     it is all of the backup or none of it, and "none" means the diary that
+     was there before is still there. */
   let skipped=0;
-  const put=async(store,rec,fix)=>{
-    try{
-      if(!rec||typeof rec!=='object'||!rec.id)throw new Error('no id');
-      await dbPut(store,fix?fix(rec):rec);
-    }catch(e){skipped++;}
+  const prep=(arr,fix)=>{
+    const out=[];
+    for(const r of Array.isArray(arr)?arr:[]){
+      if(!r||typeof r!=='object'||!r.id){skipped++;continue;}
+      try{out.push(fix(r));}catch(e){skipped++;}
+    }
+    return out;
   };
   // additive-schema rule: spread defaults so older backups gain new fields
-  for(const f of data.foods||[])await put('foods',f,r=>derivePer({...FOOD_DEF,...r}));
-  for(const e of data.entries||[])await put('entries',e,r=>({...r,
+  const foods=prep(data.foods,r=>derivePer({...FOOD_DEF,...r}));
+  const entries=prep(data.entries,r=>({...r,
     amt:+r.amt||0,unit:r.unit==='g'?'g':'serv',ts:+r.ts||Date.now()}));
-  for(const m of data.meals||[])await put('meals',m,r=>({...r,items:Array.isArray(r.items)?r.items:[]}));
+  const meals=prep(data.meals,r=>({...r,items:Array.isArray(r.items)?r.items:[]}));
   // kg coerced: a hand-edited backup can carry it as a string, which would
   // silently plot nothing on the weight chart
-  for(const b of data.body||[])await put('body',b,r=>({...r,kg:+r.kg||0}));
-  const inc=data.settings||{};
-  S.set={...DEF,...inc,t:{...DEF.t,...(inc.t||{})},prof:{...DEF.prof,...(inc.prof||{})}};
-  await kvPut('settings',S.set);
-  await kvPut('notes',data.notes||{});
-  await loadAll();
-  applyTheme();
+  const body=prep(data.body,r=>({...r,kg:+r.kg||0}));
+  const inc=data.settings&&typeof data.settings==='object'?data.settings:{};
+  const set={...DEF,...inc,t:{...DEF.t,...(inc.t||{})},prof:{...DEF.prof,...(inc.prof||{})}};
+  const notes=data.notes&&typeof data.notes==='object'&&!Array.isArray(data.notes)?data.notes:{};
   /* The file just restored from IS a backup, and the file's own timestamp is how
      old it is — so date "last backup" from the export, not from now. A restored
      three-month-old file should still be nagged about, and a fresh phone should
      not be nagged the moment it finishes importing. */
   const exp=Date.parse(data.exported||'');
-  await noteBackup(isNaN(exp)?Date.now():Math.min(exp,Date.now()));
-  return {entries:S.entries.length,foods:(data.foods||[]).length,skipped};
+  const bkAt=isNaN(exp)?Date.now():Math.min(exp,Date.now());
+  await dbRun(['foods','entries','meals','body','kv'],'readwrite',tx=>{
+    const put=(s,rec,key)=>{
+      try{
+        const r=key===undefined?tx.objectStore(s).put(rec):tx.objectStore(s).put(rec,key);
+        // a record the engine rejects (e.g. an id that isn't a valid key) is
+        // skipped, never allowed to abort the whole restore
+        r.onerror=e=>{e.preventDefault();e.stopPropagation();skipped++;};
+      }catch(e){skipped++;}
+    };
+    for(const s of['foods','entries','meals','body'])tx.objectStore(s).clear();
+    for(const f of foods)put('foods',f);
+    for(const e of entries)put('entries',e);
+    for(const m of meals)put('meals',m);
+    for(const b of body)put('body',b);
+    tx.objectStore('kv').put(set,'settings');
+    tx.objectStore('kv').put(notes,'notes');
+    tx.objectStore('kv').put(bkAt,'lastBackupAt');
+  });
+  BK.last=bkAt;
+  try{
+    await loadAll();
+    applyTheme();
+  }catch(e){
+    // the restore itself committed; only reading it back failed — a fresh
+    // start re-reads it cleanly, so never report this as a failed restore
+    console.error(e);
+    setTimeout(()=>location.reload(),1800);
+    return {entries:entries.length,foods:foods.length,skipped};
+  }
+  return {entries:S.entries.length,foods:foods.length,skipped};
 }
 /* auto-repeating daily foods: rules in settings.autoLog are logged once per
    day, the first time the app runs that day (supplements, staple breakfasts) */
 async function applyAutoLog(){
   const today=todayStr();
   if(S.set.autoDate===today||!(S.set.autoLog||[]).length)return;
+  /* v4.0: ask storage, not memory, whether today already ran — another tab or
+     window may have done it while this one sat in the background overnight,
+     and logging the same supplements twice is exactly what this must not do */
+  try{
+    const fresh=await kvGet('settings');
+    if(fresh&&fresh.autoDate===today){S.set.autoDate=today;S.stale=true;return;}
+  }catch(e){}
   // skip rules whose exact entry already exists today — e.g. the user
   // copied yesterday (which contained the auto-logged items) before the
   // day's auto-run fired; mirrors the dedupe in copyDaySheet
@@ -5180,49 +6075,96 @@ function importSheet(){
   const file=h('input',{type:'file',accept:'.json,application/json',style:'display:none',
     onchange:async e=>{
       const f=e.target.files[0];
+      e.target.value='';   // picking the same file again must still fire
       if(!f)return;
+      /* v4.0: the file is checked and described BEFORE anything is asked —
+         when it was saved, which days it covers, and what it would replace —
+         so the choice being confirmed is actually visible */
+      let data;
+      try{data=JSON.parse(await f.text());}
+      catch(err){toast('That file isn’t readable — is it a MacroLog backup (.json)?',{err:true,dur:4500});return;}
+      if(!isBackup(data)){toast('That file isn’t a MacroLog backup',{err:true,dur:4500});return;}
+      const dates=data.entries.map(x=>x&&String(x.date)).filter(d=>/^\d{4}-\d\d-\d\d$/.test(d)).sort();
+      const nDays=new Set(dates).size;
+      const exp=Date.parse(data.exported||'');
+      const msg='This backup'+(isNaN(exp)?'':', saved '+new Date(exp).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}))+
+        ', holds '+data.entries.length+' entries over '+nDays+' day'+(nDays===1?'':'s')+
+        (dates.length?' ('+fmtDay(dates[0])+' – '+fmtDay(dates[dates.length-1])+')':'')+
+        ', '+(Array.isArray(data.foods)?data.foods.length:0)+' foods and '+(Array.isArray(data.meals)?data.meals.length:0)+' meals. '+
+        'It replaces everything on this device — currently '+S.entries.length+' entries over '+S.byDate.size+' days.';
+      if(!await ask('Replace all data?',msg,'Replace with this backup',true))return;
       try{
-        const data=JSON.parse(await f.text());
-        const n=(data.entries||[]).length;
-        if(!await ask('Replace all data?','This backup holds '+n+' diary entries and '+
-          (data.foods||[]).length+' foods. Your current data will be overwritten.','Import',true))return;
         const res=await applyImport(data);
-        close();switchTab(S.tab);
-        toast('Imported '+res.entries+' entries ✓'+
+        close();
+        // restored from the onboarding screen: the backup brought its own
+        // settings, so there is nothing left to set up
+        if(document.body.classList.contains('ob-open')&&S.set.onboard)obClose();
+        switchTab(S.tab);
+        toast('Restored '+res.entries+' entries ✓'+
           (res.skipped?' · '+res.skipped+' unreadable record'+(res.skipped===1?'':'s')+' skipped':''),
           {pr:true,dur:res.skipped?4000:2400});
-      }catch(err){toast('Import failed: '+err.message,{dur:4000});}
+      }catch(err){
+        console.error(err);
+        // the restore is one transaction: a failure means nothing changed
+        toast('Restore failed — nothing was changed. '+(err&&err.message||''),{err:true,dur:5600});
+      }
     }});
   const body=h('div',{},
-    h('p',{class:'small dim',style:'margin:0 2px 12px'},
-      'Restores a MacroLog JSON backup — replaces everything currently on this device.'),
-    h('button',{class:'btn primary',onclick:()=>file.click()},'Choose backup file'),file);
-  const close=sheet('Import backup',body);
+    h('p',{class:'small dim',style:'margin:0 2px 12px;line-height:1.5'},
+      'Restores a MacroLog JSON backup. It replaces everything currently on this device, so back this device up first if it holds anything you want to keep.'),
+    h('button',{class:'btn primary',onclick:()=>file.click()},'Choose backup file'),
+    S.entries.length?h('button',{class:'btn sm mt8',onclick:downloadExport},'Back up this device first'):null,
+    file);
+  const close=sheet('Restore from a backup',body);
 }
 async function wipeAll(){
   if(!await ask('Erase everything','All diary entries, foods, meals and settings on this device will be deleted.','Erase',true))return;
   if(!await ask('Really erase?','Last chance — there is no undo. Export a backup first?','Erase it all',true))return;
-  await Promise.all([dbClear('foods'),dbClear('entries'),dbClear('meals'),dbClear('body'),dbClear('kv')]);
+  await dbRun(['foods','entries','meals','body','kv'],'readwrite',tx=>{
+    for(const s of['foods','entries','meals','body','kv'])tx.objectStore(s).clear();
+  });
+  try{localStorage.removeItem('mlFete');}catch(e){}
   location.reload();
 }
 
 /* ---------------- onboarding ---------------- */
+/* v4.0: a step indicator, the ring motif, Enter to continue, a way back from
+   step 2 — and "Restore from a backup" on the very first screen. Moving to a
+   new phone used to mean finishing onboarding with made-up numbers just to
+   reach the import button in Settings. */
+function obArt(){
+  const svg=sv('svg',{class:'ob-art',viewBox:'0 0 84 84','aria-hidden':'true'});
+  const R=[[38,6,'var(--acc)',.78],[28.5,5.4,'var(--mp)',.62],[20,4.8,'var(--mc)',.86],[12.5,4.2,'var(--mf)',.5]];
+  for(const[r,w,col,pct]of R){
+    svg.append(sv('circle',{cx:42,cy:42,r,'stroke-width':w,stroke:'var(--card2)'}));
+    const a=sv('circle',{cx:42,cy:42,r,'stroke-width':w,stroke:col,pathLength:100,
+      'stroke-dasharray':(pct*100)+' 100',transform:'rotate(-90 42 42)'});
+    svg.append(a);
+  }
+  return svg;
+}
 function obStart(){
   const ob=$('#ob');
   ob.classList.add('open');
+  document.body.classList.add('ob-open');
+  const steps=n=>h('div',{class:'ob-steps','aria-label':'Step '+n+' of 2'},
+    h('i',{class:n>=1?'on':''}),h('i',{class:n>=2?'on':''}));
   step1();
   function step1(){
     ob.innerHTML='';
+    const next=()=>{S.set.name=nameI.value.trim();step2();};
     const nameI=h('input',{class:'in',placeholder:'Your first name',autocomplete:'given-name',
-      value:S.set.name,style:'font-size:19px;padding:14px'});
+      enterkeyhint:'next',value:S.set.name,style:'font-size:19px;padding:14px',
+      onkeydown:e=>{if(e.key==='Enter'){e.preventDefault();next();}}});
     ob.append(
+      steps(1),obArt(),
       h('div',{class:'ob-kicker'},'MacroLog'),
       h('div',{class:'ob-title'},'Eat with ',h('i',{},'intent.')),
       h('p',{class:'ob-sub'},'Log meals in seconds — scan barcodes, search half a million foods, or build your own. Works fully offline. All data stays on your phone.'),
       labeled('What should we call you?',nameI),
-      h('button',{class:'btn primary mt12',onclick:()=>{
-        S.set.name=nameI.value.trim();step2();
-      }},'Continue'));
+      h('button',{class:'btn primary mt12',onclick:next},'Continue'),
+      h('button',{class:'linkbtn',style:'display:block;margin:22px auto 0',onclick:importSheet},
+        'Moving from another phone? Restore a backup'));
   }
   function step2(){
     ob.innerHTML='';
@@ -5232,11 +6174,10 @@ function obStart(){
       if(prof)S.set.prof=prof;
       S.set.onboard=1;
       await saveSet();
-      ob.classList.remove('open');
+      obClose();
       switchTab('today');
       toast(S.set.name?'Welcome, '+S.set.name+' — targets set':'Welcome — targets set',{pr:true});
     };
-    let mode='calc';
     const cards=h('div',{},
       h('button',{class:'opt-card on',onclick:e=>pick('calc',e.currentTarget)},
         h('b',{},'Calculate for me'),
@@ -5245,38 +6186,60 @@ function obStart(){
         h('b',{},'I know my numbers'),
         h('span',{},'Type calories, protein, carbs and fat directly.')));
     function pick(m,el){
-      mode=m;
       $$('.opt-card').forEach(c=>c.classList.remove('on'));
       el.classList.add('on');
       holder.innerHTML='';
       holder.append(m==='calc'?calcForm(done,'Start tracking'):manualForm(done,'Start tracking'));
     }
     ob.append(
+      steps(2),
       h('div',{class:'ob-kicker'},greetWord()+(S.set.name?', '+S.set.name:'')),
       h('div',{class:'ob-title'},'Set your daily ',h('i',{},'targets.')),
       h('p',{class:'ob-sub'},'You can change these any time in Settings.'),
-      cards,holder);
+      cards,holder,
+      h('button',{class:'linkbtn',style:'display:block;margin:18px auto 0',onclick:step1},'‹ Back'));
     holder.append(calcForm(done,'Start tracking'));
+    ob.scrollTop=0;
   }
+}
+function obClose(){
+  $('#ob').classList.remove('open');
+  document.body.classList.remove('ob-open');
 }
 
 /* ---------------- theme ---------------- */
+const SYS_LIGHT=matchMedia('(prefers-color-scheme: light)');
+const themeIsLight=()=>S.set.theme==='light'||(S.set.theme==='auto'&&SYS_LIGHT.matches);
+function accentVars(light){
+  const[a,a2,la,li]=ACCENTS[S.set.accent]||ACCENTS.bronze;
+  return light
+    ?{'--acc':la,'--acc2':a,'--acc-dim':la+'26','--acc-ink':li,'--acc-fill':li,'--chrome-acc':a2}
+    :{'--acc':a,'--acc2':a2,'--acc-dim':a+'26','--acc-ink':a,'--acc-fill':a,'--chrome-acc':li};
+}
+const THEME_BAR={light:'#F4F2EB',dark:'#17181D'};   // = --bgtop, the header's own colour
 function applyTheme(){
-  const light=S.set.theme==='light';
+  const light=themeIsLight();
   document.body.classList.toggle('light',light);
-  const[a,a2,la]=ACCENTS[S.set.accent]||ACCENTS.bronze;
-  const acc=light?la:a,acc2=light?a:a2;
-  document.body.style.setProperty('--acc',acc);
-  document.body.style.setProperty('--acc2',acc2);
-  document.body.style.setProperty('--acc-dim',acc+'26');
-  $('meta[name="theme-color"]').setAttribute('content',light?'#ECEAE3':'#0B0B0D');
+  for(const[k,v]of Object.entries(accentVars(light)))document.body.style.setProperty(k,v);
+  $('meta[name="theme-color"]').setAttribute('content',light?THEME_BAR.light:THEME_BAR.dark);
+  /* remembered for the NEXT launch's first paint (the inline script at the top
+     of <body>), so a light-theme phone no longer flashes dark while the
+     database opens. Both variants are kept so 'auto' can pick at paint time. */
+  try{localStorage.setItem('mlLook',JSON.stringify({t:S.set.theme,d:accentVars(false),l:accentVars(true),
+    bar:THEME_BAR}));}catch(e){}
   fxColor();
   destroyCharts();               // charts re-pick palette on next render
   if(S.tab==='progress')renderProgress();
 }
+// the phone switching between light and dark (sunset, a schedule) — follow it
+try{
+  const onSys=()=>{if(S.set.theme==='auto')applyTheme();};
+  if(SYS_LIGHT.addEventListener)SYS_LIGHT.addEventListener('change',onSys);
+  else SYS_LIGHT.addListener(onSys);            // Safari < 14
+}catch(e){}
 
 /* ---------------- load & boot ---------------- */
-async function loadAll(){
+async function loadAll(opts){
   const[foods,entries,meals,body,set,notes]=await Promise.all([
     allOf('foods'),allOf('entries'),allOf('meals'),allOf('body'),
     kvGet('settings'),kvGet('notes')]);
@@ -5291,21 +6254,32 @@ async function loadAll(){
   // tombstones (presence check can never resurrect a deleted staple), and
   // code OWNS the nutrition of unedited seeds — so model upgrades (e.g. the
   // v2 micronutrient fields) propagate into stored copies on next boot.
+  // v4.0: written in ONE transaction — a first launch used to make 99
+  // separate round-trips here before the app could draw anything.
+  const writes=[];
   for(const sf of SEED_FOODS){
     const ex=S.foods.get(sf.id);
     if(!ex){
       const c={...sf,ts:Date.now()};
       S.foods.set(c.id,c);
-      await dbPut('foods',c);
+      writes.push(c);
     }else if(!ex.edited){
       const upd={...ex,name:sf.name,per:sf.per,p100:sf.p100,
         servLabel:sf.servLabel,servG:sf.servG,adds:sf.adds};
       if(JSON.stringify(upd)!==JSON.stringify(ex)){
         S.foods.set(sf.id,upd);
-        await dbPut('foods',upd);
+        writes.push(upd);
       }
     }
   }
+  /* A resync (another tab changed something) only READS: the tab that booted
+     first already wrote the seeds, and two tabs on different builds rewriting
+     each other's seeds would ping each other forever. */
+  if(writes.length&&!(opts&&opts.resync))await dbRun(['foods'],'readwrite',tx=>{
+    const st=tx.objectStore('foods');
+    for(const f of writes)st.put(f);
+  });
+  DT.clear();   // seed refreshes above can change macros behind reindex()
 }
 /* cache hygiene (v2.3): every network search caches its results into the
    foods store for offline reuse — left alone that grows without bound and
@@ -5320,16 +6294,85 @@ async function pruneFoodCache(){
   for(const m of S.meals)for(const it of m.items||[])used.add(it.foodId);
   for(const r of S.set.autoLog||[])used.add(r.foodId);
   const cutoff=Date.now()-60*86400000;
-  let n=0;
-  for(const f of [...S.foods.values()]){
+  const gone=[];
+  for(const f of S.foods.values()){
     if(f.src!=='off'&&f.src!=='fdc')continue;
     if(f.hidden||f.edited||f.used||f.lastUsed||used.has(f.id))continue;
     if((f.ts||0)>cutoff)continue;
-    S.foods.delete(f.id);
-    await dbDel('foods',f.id);
-    n++;
+    gone.push(f.id);
   }
-  return n;
+  if(!gone.length)return 0;
+  await dbRun(['foods'],'readwrite',tx=>{
+    const st=tx.objectStore('foods');
+    for(const id of gone)st.delete(id);
+  });
+  for(const id of gone)S.foods.delete(id);   // only once the deletes committed
+  return gone.length;
+}
+/* ================= iOS 26/27 resilience (v4.0) =================
+   Field-reported WebKit behaviour in iOS 27 home-screen apps, and the answer
+   to each (the CSS halves live in the v4.0 layer):
+   · Liquid Glass top edge — see #sbar: an opaque fixed strip, opaque header.
+   · Late / lost safe-area insets — iOS 27.0 lays a document out first at
+     402×778 with ZERO insets and grows it when they arrive 25–60 ms later; a
+     navigation inside that window leaves them stuck at 0, parking the header
+     under the Dynamic Island. healInsets() re-requests them (below).
+   · Keyboard over fixed sheets, and iOS 26's stale visualViewport.offsetTop
+     after the keyboard closes — kbSync() (below).
+   · Scripted haptics dead since iOS 26.5 — hapticTap() (helpers).
+   · Camera streams die in the background — the scanner closes on hide.
+   · Scroll anchoring switched on in Safari 27 — off on our scrollers (CSS). */
+const isStandalone=()=>navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
+const isTyping=()=>{const a=document.activeElement;
+  return !!(a&&a.matches&&a.matches('textarea,select,input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file])'));};
+/* ---- keyboard: how much of the layout viewport it hides ----
+   Measured against the LAYOUT viewport (documentElement.clientHeight — the box
+   a fixed overlay fills), not innerHeight, which iOS 27 standalone has been
+   seen to over-report by the top inset. Small differences are toolbars and
+   rounding, never a keyboard. */
+let KB_RAF=0;
+function kbSync(){
+  KB_RAF=0;
+  const vv=window.visualViewport;
+  if(!vv)return;
+  const lay=document.documentElement.clientHeight||window.innerHeight;
+  let kb=Math.round(lay-vv.height-vv.offsetTop);
+  if(kb<80)kb=0;
+  const st=document.documentElement.style;
+  st.setProperty('--kb',kb+'px');
+  st.setProperty('--vvh',Math.round(vv.height)+'px');
+  // iOS 26: after the keyboard goes, offsetTop can stay stale and leave every
+  // fixed element shifted up — put it back once nothing is being typed into
+  if(!kb&&vv.offsetTop>0&&!isTyping())window.scrollTo(0,0);
+}
+const kbQueue=()=>{if(!KB_RAF)KB_RAF=requestAnimationFrame(kbSync);};
+/* ---- safe-area insets that never arrived (iOS 27.0) ----
+   Every Face ID iPhone is ≥812pt tall and has a top inset in portrait, so a
+   standalone portrait read of 0 there is the bug, not the device. Taking
+   viewport-fit=cover out of the viewport meta and putting it back two frames
+   later makes WebKit send the insets again. Bounded: three tries per load. */
+let INSET_PROBE=null,HEAL_N=0;
+function insetTop(){
+  if(!INSET_PROBE){
+    INSET_PROBE=h('div',{'aria-hidden':'true',
+      style:'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top)'});
+    document.body.append(INSET_PROBE);
+  }
+  return parseFloat(getComputedStyle(INSET_PROBE).paddingTop)||0;
+}
+function healInsets(){
+  try{
+    if(!IS_IOS||!isStandalone()||HEAL_N>=3)return;
+    if(!matchMedia('(orientation: portrait)').matches)return;
+    if(Math.max(screen.width,screen.height)<812)return;   // Touch ID iPhones: no inset to lose
+    if(insetTop()>0)return;
+    const m=document.querySelector('meta[name=viewport]');
+    const v=m&&m.getAttribute('content');
+    if(!v||!/viewport-fit=cover/.test(v))return;
+    HEAL_N++;
+    m.setAttribute('content',v.replace(/,?\s*viewport-fit=cover/,''));
+    requestAnimationFrame(()=>requestAnimationFrame(()=>m.setAttribute('content',v)));
+  }catch(e){}
 }
 const HAPTIC_SW=(()=>{  // iOS ≥18: clicking a hidden switch-checkbox fires a system haptic
   const el=document.createElement('input');
@@ -5399,8 +6442,27 @@ async function boot(){
     }
   }
   fixShell();
-  if(window.visualViewport)visualViewport.addEventListener('resize',fixShell);
+  if(window.visualViewport){
+    visualViewport.addEventListener('resize',fixShell);
+    // keyboard-aware sheets (see kbSync)
+    visualViewport.addEventListener('resize',kbQueue);
+    visualViewport.addEventListener('scroll',kbQueue);
+  }
+  kbSync();
   addEventListener('pageshow',fixShell);
+  // iOS 27.0 late/lost safe-area insets: check once they should have arrived,
+  // and again whenever the app comes back or turns (see healInsets)
+  setTimeout(healInsets,150);
+  setTimeout(healInsets,1200);
+  addEventListener('pageshow',()=>setTimeout(healInsets,150));
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){
+      // iOS stops the camera in the background and hands back a frozen
+      // stream — close the scanner (releasing the camera) rather than show it
+      if(SCAN.on)closeScanner();
+    }else setTimeout(healInsets,150);
+  });
+  addEventListener('orientationchange',()=>setTimeout(healInsets,500));
   addEventListener('orientationchange',()=>{
     document.documentElement.style.height='';
     document.body.style.height='';
@@ -5409,14 +6471,22 @@ async function boot(){
   });
   // midnight rollover: Today must flip to the new date without a relaunch
   let lastDay=todayStr();
+  function checkRollover(){
+    const now=todayStr();
+    if(now===lastDay)return;
+    // a Diary left on "today" follows the calendar; any other day stays put
+    if(S.date===lastDay)S.date=now;
+    lastDay=now;
+    applyAutoLog().then(()=>{if(S.tab==='today'||S.tab==='diary')renderTab(S.tab);}).catch(reportError);
+    if(S.tab==='today')switchTab('today');
+  }
   setInterval(()=>{
-    fixShell();
-    if(todayStr()!==lastDay){
-      lastDay=todayStr();
-      applyAutoLog().then(()=>{if(S.tab==='today'||S.tab==='diary')renderTab(S.tab);}).catch(()=>{});
-      if(S.tab==='today')switchTab('today');
-    }
+    // layout reads are wasted on a hidden page; the date check is not
+    if(!document.hidden)fixShell();
+    checkRollover();
   },1000);
+  // a phone waking the app the next morning shouldn't wait on the timer
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkRollover();});
   if('serviceWorker' in navigator&&window.isSecureContext)
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   // debug/test handle (same pattern as IronLog's __il)
@@ -5431,15 +6501,43 @@ async function boot(){
     microDefault,microRDA,SPLITS,MICRO_AGE,
     ensurePersistence,storageReport,STORE_ST,fmtBytes,
     backupNagDue,backupNagCard,backupDueDays,nagRefresh,BK,noteBackup,
-    canShareBackup,downloadExport,APP_VER};
+    canShareBackup,downloadExport,APP_VER,
+    // v4.0
+    applyTheme,themeIsLight,quickAddSheet,openLogSheet,deleteEntry,restoreEntry,undoToast,
+    dbRun,LAYERS,openScanner,closeScanner,weekAvg,insightLines,localMatcher,cacheFoods,
+    isBackup,importSheet,obStart,copyDaySheet,DT,resyncIfIdle,SCAN};
+  // a reload while a sheet was open leaves its history entry behind, armed
+  // for a sheet that no longer exists
+  if(armed()){try{history.replaceState(null,'');}catch(e){}}
   if(!S.set.onboard)obStart();
-  else switchTab('today');
+  else openFromLaunch();
+  S.booted=true;
 }
+/* Home-screen shortcuts (manifest.json) arrive as ?tab=add|diary|… or
+   ?scan=1. The query is dropped once read, so a later reload lands on the
+   app's own last state rather than replaying the shortcut. */
+function openFromLaunch(){
+  let q=null;
+  try{q=new URLSearchParams(location.search);}catch(e){}
+  const tab=q&&q.get('tab');
+  const scan=!!(q&&q.get('scan')==='1');
+  switchTab(scan?'add':(tab&&TABS.some(t=>t[0]===tab))?tab:'today');
+  if(q&&(q.has('tab')||q.has('scan'))){try{history.replaceState(null,'',location.pathname);}catch(e){}}
+  if(scan)openScanner();
+}
+/* A start-up failure gets a real screen with a way out, not red text over a
+   half-drawn shell. The usual causes: private browsing modes that disable
+   IndexedDB, the page opened from file://, or storage blocked by a setting. */
 boot().catch(err=>{
   console.error(err);
-  document.body.insertAdjacentHTML('beforeend',
-    '<div style="padding:90px 24px;text-align:center;color:#ff5c5c;font-size:15px">MacroLog failed to start: '+
-    err.message+'<br><br>IndexedDB must be available (serve over http:// or https://).</div>');
+  const box=h('div',{class:'bootfail'},
+    h('div',{class:'serif',style:'font-size:24px;font-weight:650;margin-bottom:8px'},'MacroLog couldn’t start'),
+    h('p',{class:'dim',style:'line-height:1.55;margin-bottom:6px'},
+      'It needs on-device storage (IndexedDB), and this browser refused it. Private/incognito windows, '+
+      'opening the file directly instead of from a web address, or a “block site data” setting are the usual causes.'),
+    h('p',{class:'tiny dim',style:'margin:10px 0 18px;word-break:break-word'},'Details: '+(err&&(err.name?err.name+' — ':'')+(err.message||err))),
+    h('button',{class:'btn primary',onclick:()=>location.reload()},'Try again'));
+  document.body.append(box);
 });
 </script>
 </body>
